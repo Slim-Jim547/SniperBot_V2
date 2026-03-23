@@ -61,8 +61,9 @@ class TestParseCandles:
 
 
 class TestCoinbaseBackfillFetch:
+    @patch("data.backfill.jwt.encode", return_value="fake_jwt_token")
     @patch("data.backfill.requests.get")
-    def test_fetch_returns_candles(self, mock_get):
+    def test_fetch_returns_candles(self, mock_get, mock_jwt):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = FAKE_API_RESPONSE
@@ -79,8 +80,9 @@ class TestCoinbaseBackfillFetch:
         assert len(candles) == 2
         assert mock_get.called
 
+    @patch("data.backfill.jwt.encode", return_value="fake_jwt_token")
     @patch("data.backfill.requests.get")
-    def test_fetch_raises_on_non_200(self, mock_get):
+    def test_fetch_raises_on_non_200(self, mock_get, mock_jwt):
         mock_resp = MagicMock()
         mock_resp.status_code = 401
         mock_resp.text = "Unauthorized"

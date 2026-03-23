@@ -5,12 +5,11 @@ Fetches historical OHLCV candles from Coinbase Advanced Trade REST API.
 Called once on startup to warm up indicator buffers.
 """
 
-import hashlib
-import hmac
 import logging
+import secrets
 import time
-from typing import Optional
 
+import jwt
 import requests
 
 from models import Candle
@@ -60,17 +59,30 @@ class CoinbaseBackfill:
         self._base_url = base_url.rstrip("/")
 
     def _auth_headers(self, method: str, path: str) -> dict:
-        ts = str(int(time.time()))
-        message = ts + method.upper() + path
-        signature = hmac.new(
-            self._api_secret.encode("utf-8"),
-            message.encode("utf-8"),
-            digestmod=hashlib.sha256,
-        ).hexdigest()
+        """JWT auth for Coinbase CDP API keys (required since June 2024).
+        api_key  = CDP key name, e.g. "organizations/.../apiKeys/..."
+        api_secret = EC private key in PEM format
+        """
+        uri = f"{method.upper()} api.coinbase.com{path}"
+        now = int(time.time())
+        payload = {
+            "sub": self._api_key,
+            "iss": "cdp",
+            "nbf": now,
+            "exp": now + 120,
+            "uri": uri,
+        }
+        token = jwt.encode(
+            payload,
+            self._api_secret,
+            algorithm="ES256",
+            headers={
+                "kid": self._api_key,
+                "nonce": secrets.token_hex(),
+            },
+        )
         return {
-            "CB-ACCESS-KEY": self._api_key,
-            "CB-ACCESS-SIGN": signature,
-            "CB-ACCESS-TIMESTAMP": ts,
+            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         }
 

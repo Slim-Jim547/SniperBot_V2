@@ -1,0 +1,12 @@
+# Never commit credentials
+config/config.yaml
+
+# Runtime artifacts
+logs/
+data/sniperbot.db
+data/backtest.db
+data/historical/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
