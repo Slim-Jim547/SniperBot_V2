@@ -1,0 +1,80 @@
+# SniperBot V2 — Full configuration schema
+# All parameters live here. Nothing is hardcoded in Python.
+
+exchange:
+  api_key: ""          # Coinbase Advanced Trade API key
+  api_secret: ""       # Coinbase Advanced Trade API secret
+  base_url: "https://api.coinbase.com"
+  ws_url: "wss://advanced-trade-ws.coinbase.com"
+
+broker:
+  mode: "paper"        # paper | live — change this one line to go live
+
+symbols:
+  - "ATOM-USD"
+
+timeframe: "5"         # candle size in minutes (5 = 5-minute candles)
+
+backfill:
+  candle_count: 500    # how many historical candles to load on startup
+  max_per_request: 300 # Coinbase API max per request
+
+indicators:
+  ema_fast: 9
+  ema_slow: 21
+  ema_trend: 50
+  rsi_period: 14
+  bb_period: 20
+  bb_std: 2.0
+  atr_period: 14
+  adx_period: 14
+  volume_ma_period: 20
+  mtf_timeframe: "60"  # multi-timeframe in minutes (1h)
+
+regime:
+  adx_trending_threshold: 25    # ADX above this → TRENDING
+  adx_breakout_threshold: 30    # ADX above this + BB wide → BREAKOUT
+  bb_squeeze_threshold: 0.02    # BB width % below this → squeeze
+  volume_surge_ratio: 1.5       # volume / volume_ma above this → surge
+
+strategies:
+  momentum:
+    bb_squeeze_periods: 5           # candles BB must be squeezed before breakout
+    breakout_atr_multiplier: 0.5    # price must move this many ATRs from BB mid
+  trend_follow:
+    ema_alignment_required: true    # fast > slow > trend required
+    adx_min: 25                     # minimum ADX for entry
+
+risk:
+  mode: "risk_pct"             # risk_pct | notional
+  risk_per_trade_pct: 1.0      # % of account to risk per trade
+  notional_size: 100.0         # fixed USD size if mode = notional
+  max_position_pct: 10.0       # max % of account in a single position
+  daily_loss_limit_pct: 3.0    # halt trading after this daily drawdown %
+  max_trades_per_day: 10       # circuit breaker: max trades in one day
+  cooldown_minutes: 30         # cooldown after a loss before next trade
+
+database:
+  path: "data/sniperbot.db"
+  backtest_path: "data/backtest.db"
+
+alerts:
+  discord_webhook: ""          # Discord webhook URL
+  telegram_bot_token: ""       # Telegram bot token
+  telegram_chat_id: ""         # Telegram chat ID
+
+dashboard:
+  port: 5000
+  refresh_seconds: 30
+
+logging:
+  level: "INFO"
+  file: "logs/bot.log"
+
+# Phase 4 — Backtest Engine
+backtest:
+  data_path: "data/historical"      # local CSV cache directory
+  initial_capital: 10000.0          # starting portfolio value in USD
+  maker_fee: 0.006                  # Coinbase Advanced Trade taker fee
+  taker_fee: 0.006
+  slippage_pct: 0.001               # 0.1% slippage model
