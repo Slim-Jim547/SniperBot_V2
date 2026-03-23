@@ -7,6 +7,7 @@ No other module touches the database directly.
 
 import sqlite3
 import json
+import math
 import logging
 from typing import Optional
 
@@ -148,7 +149,10 @@ class TradeDB:
             (
                 symbol, strategy, regime, signal_type,
                 int(blocked), block_reason, timestamp,
-                json.dumps(indicators),
+                json.dumps({
+                    k: (None if isinstance(v, float) and not math.isfinite(v) else v)
+                    for k, v in indicators.items()
+                }),
             ),
         )
         conn.commit()

@@ -120,7 +120,13 @@ def run(config_path: str = "config/config.yaml"):
     )
 
     logger.info("Starting live feed. Press Ctrl+C to stop.")
-    asyncio.run(feed.run())
+    try:
+        asyncio.run(feed.run())
+    except KeyboardInterrupt:
+        logger.info("Shutting down...")
+    finally:
+        db.close()
+        logger.info("Database closed.")
 
 
 if __name__ == "__main__":

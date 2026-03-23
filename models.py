@@ -13,3 +13,6 @@ class Candle:
 
     def is_bullish(self) -> bool:
         return self.close >= self.open
+
+    def is_bearish(self) -> bool:
+        return self.close < self.open
