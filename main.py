@@ -57,8 +57,9 @@ def run(config_path: str = "config/config.yaml"):
     timeframe = cfg["timeframe"]
 
     # ── Storage ──────────────────────────────────────────────────────────
-    os.makedirs("data", exist_ok=True)
-    db = TradeDB(cfg["database"]["path"])
+    db_path = cfg["database"]["path"]
+    os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
+    db = TradeDB(db_path)
     db.create_tables()
     logger.info("Database initialised")
 

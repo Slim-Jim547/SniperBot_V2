@@ -29,7 +29,7 @@ venv/Scripts/pip install -r requirements.txt
 ```
 ├── config/config.yaml          # All parameters — nothing hardcoded in Python
 ├── secrets/                    # Credentials only — never committed to git
-│   └── secrets.yaml            # Coinbase API key/secret, Discord webhook, Telegram token
+│   └── secrets.yaml            # Exchange API key/secret (Phase 6 only), Discord webhook, Telegram token
 ├── core/
 │   ├── state_machine.py        # IDLE → WATCHING → IN_TRADE → CLOSING
 │   ├── regime_detector.py      # ADX + BB + volume → RegimeLabel enum
@@ -49,7 +49,7 @@ venv/Scripts/pip install -r requirements.txt
 ├── execution/
 │   ├── broker_base.py          # Abstract broker interface (shared contract)
 │   ├── paper_broker.py         # Simulated fills — reads config, no API calls
-│   └── live_broker.py          # Coinbase Advanced Trade API order placement
+│   └── live_broker.py          # Kraken REST API order placement (Phase 6)
 ├── storage/trade_db.py         # SQLite — all reads and writes go through here
 ├── alerts/notifier.py          # Discord + Telegram behind one interface
 ├── dashboard/app.py            # Local Flask app — reads SQLite, auto-refreshes
@@ -60,9 +60,9 @@ venv/Scripts/pip install -r requirements.txt
 
 **Data flow on startup (Phase 1):**
 ```
-config.yaml → CoinbaseBackfill (REST) → deque[Candle] → compute_all() → TradeDB.insert_signal()
-                                                         ↑
-config.yaml → CoinbaseFeed (WebSocket) → on_candle_close() (each 5m candle)
+config.yaml → KrakenBackfill (REST, no auth) → deque[Candle] → compute_all() → TradeDB.insert_signal()
+                                                                ↑
+config.yaml → KrakenFeed (WebSocket, no auth) → on_candle_close() (each 5m candle)
 ```
 
 **Per-candle-close flow (Phase 2+):**
@@ -113,17 +113,30 @@ Two files, strict separation:
 - `timeframe` — candle size in minutes (default `"5"`)
 
 **`secrets/secrets.yaml`** — all credentials (gitignored, never committed):
-- `exchange.api_key` / `exchange.api_secret` — Coinbase CDP keys
+- `exchange.api_key` / `exchange.api_secret` — Kraken API keys (Phase 6 live trading only — not needed for Phases 1–5)
 - `alerts.discord_webhook`
 - `alerts.telegram_bot_token` / `alerts.telegram_chat_id`
 
-## API Authentication
+## Exchange: Kraken
 
-Coinbase uses **CDP JWT authentication** (ES256, not legacy HMAC). `CoinbaseBackfill._auth_headers()` builds JWT tokens signed with the EC private key from `exchange.api_secret` (loaded from `secrets/secrets.yaml` after Phase 1.5). The WebSocket feed (`CoinbaseFeed`) does not require auth for `market_trades` subscription.
+**Data pivot (March 2026):** Originally targeted Coinbase Advanced Trade. Switched to Kraken because Kraken's public market data endpoints require **zero authentication** — no API keys needed for Phases 1–5.
 
-**Credential location (Phase 1):** `config/config.yaml` holds credentials and is gitignored. `secrets/secrets.yaml` is the Phase 1.5 target — does not exist yet.
+**Kraken public REST (backfill):**
+- Endpoint: `GET https://api.kraken.com/0/public/OHLC?pair=ATOMUSD&interval=5&since=<unix_ts>`
+- Max 720 candles per request
+- Response: `{"result": {"ATOMUSD": [[time, open, high, low, close, vwap, volume, count], ...], "last": <ts>}}`
+- No `Authorization` header needed
 
-**Unresolved (March 2026):** CDP portal "Secret API Keys" are 36-char key + 88-char secret (alphanumeric, no dashes, no PEM). Auth format for this key type is unknown — needs investigation. The `organizations/.../apiKeys/...` + PEM format (used by official `coinbase-advanced-py` SDK) could not be located in the CDP portal by the user.
+**Kraken public WebSocket (live feed):**
+- URL: `wss://ws.kraken.com`
+- Subscribe: `{"event":"subscribe","pair":["ATOM/USD"],"subscription":{"name":"ohlc","interval":5}}`
+- Messages: `[channelID, [beginTime, endTime, open, high, low, close, vwap, volume, count], "ohlc-5", "ATOM/USD"]`
+- Candle closes when `beginTime` in a new message differs from the previous — emit the old candle
+- No auth needed for market data subscriptions
+
+**Symbol format:** `ATOMUSD` for REST params, `ATOM/USD` for WebSocket pair names.
+
+**Kraken live trading auth (Phase 6 only):** REST private endpoints use HMAC-SHA512. API key + secret go in `secrets/secrets.yaml`. Not needed until Phase 6.
 
 ## Build Phases
 
@@ -132,7 +145,8 @@ Each phase must be fully validated before starting the next.
 | Phase | Goal | Validation |
 |-------|------|------------|
 | 1 ✅ | Foundation — config, indicators, backfill, feed, SQLite | Bot starts, backfills, prints indicators on each close, logs to DB |
-| 1.5 | Secrets — create `secrets/secrets.yaml`, move all credentials out of `config.yaml`, add `secrets/` to `.gitignore` | Bot still starts; no credentials in `config.yaml`; `secrets/` not tracked by git |
+| 1.5 ✅ | Secrets — create `secrets/secrets.yaml`, move all credentials out of `config.yaml`, add `secrets/` to `.gitignore` | No credentials in `config.yaml`; `secrets/` not tracked by git |
+| 1.6 | **Kraken pivot** — rewrite `data/backfill.py` and `data/feed.py` for Kraken public API (no auth) | Bot starts, backfills 500 candles from Kraken, prints indicators on each live close |
 | 2 | Regime detector + strategies + paper broker + state machine | Signals fire in correct regimes only; paper trades open/close; all logged |
 | 3 | Risk & exits — ATR trailing stop, position sizer, circuit breaker, alerts | Trailing stop trails correctly on candle close; circuit breakers fire; Discord alerts working |
 | 4 | Backtest engine — offline OHLCV replay | Backtest completes without errors; results are believable (90%+ win rate = bug) |
@@ -141,13 +155,40 @@ Each phase must be fully validated before starting the next.
 
 **Do not rush to Phase 6.** A bot that is not profitable on paper will not be profitable live. The market adds costs and slippage that make paper results optimistic.
 
+## Code Review Policy
+
+When a phase of development is complete, you MUST run the code-reviewer 
+agent before marking the phase done or moving to the next phase.
+
+A phase is complete when:
+- All planned tasks for that phase are implemented
+- All tests pass
+- You are about to tell the user "Phase X is complete"
+
+At that point, invoke the code-reviewer agent on the full project 
+directory before reporting completion to the user.
+
+## Phase Completion Requirement
+
+Before telling the user any phase is complete, you MUST:
+
+1. Run the code-reviewer agent on the project directory
+2. Present the full Codex review to the user
+3. If verdict is NEEDS WORK or BLOCKED, do NOT proceed to the next phase
+4. Only move forward after either fixing the issues or getting explicit 
+   user approval to proceed anyway
+
 ## Testing Notes
 
 `pytest.ini` sets `asyncio_mode = auto` — async tests work without `@pytest.mark.asyncio`. Use in-memory SQLite (`":memory:"`) for `TradeDB` tests. Mock HTTP with `unittest.mock.patch` for backfill tests (avoid real API calls in tests).
 
-**Backfill test mocking:** Mock both `data.backfill.jwt.encode` AND `data.backfill.requests.get` — JWT signing runs before the HTTP call, so tests fail with a PEM error if only requests is mocked:
+**Backfill test mocking (Kraken):** No JWT — only mock `data.backfill.requests.get`. Provide a response matching Kraken's OHLC format:
 ```python
-@patch("data.backfill.jwt.encode", return_value="fake_token")
 @patch("data.backfill.requests.get")
-def test_foo(self, mock_get, mock_jwt): ...
+def test_foo(self, mock_get):
+    mock_get.return_value.status_code = 200
+    mock_get.return_value.json.return_value = {
+        "error": [],
+        "result": {"ATOMUSD": [[1616148000,"7.21","7.30","7.19","7.26","7.24","100.0",10]], "last": 1616148000}
+    }
 ```

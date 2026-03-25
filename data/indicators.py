@@ -120,7 +120,10 @@ def volume_ratio(
     sell_vol = volumes.where(closes < opens, other=0.0)
     buy_sum = buy_vol.rolling(period).sum()
     sell_sum = sell_vol.rolling(period).sum()
-    return buy_sum / sell_sum.replace(0.0, np.nan)
+    ratio = buy_sum / sell_sum.replace(0.0, np.nan)
+    # When sell_sum is 0: pure buy pressure → ratio = buy_sum (large, > 1.0).
+    # When both are 0 (no volume): ratio = 1.0 (neutral).
+    return ratio.where(ratio.notna(), buy_sum.where(buy_sum > 0, 1.0))
 
 
 def compute_all(

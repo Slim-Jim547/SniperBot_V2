@@ -1,5 +1,5 @@
 # Never commit credentials
-config/config.yaml
+secrets/
 
 # Runtime artifacts
 logs/

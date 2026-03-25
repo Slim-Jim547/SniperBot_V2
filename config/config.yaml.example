@@ -1,29 +1,24 @@
 # SniperBot V2 — Full configuration schema
 # All parameters live here. Nothing is hardcoded in Python.
+# Copy this file to config/config.yaml and adjust as needed.
 
 exchange:
-  # CDP API Keys (required — legacy Coinbase Pro keys don't work with v3 API)
-  # Create at: https://portal.cdp.coinbase.com -> API Keys -> New API Key
-  api_key: "organizations/YOUR_ORG_ID/apiKeys/YOUR_KEY_ID"
-  # Paste the full PEM private key — use YAML block scalar (|) for multi-line:
-  api_secret: |
-    -----BEGIN EC PRIVATE KEY-----
-    YOUR_PRIVATE_KEY_HERE
-    -----END EC PRIVATE KEY-----
-  base_url: "https://api.coinbase.com"
-  ws_url: "wss://advanced-trade-ws.coinbase.com"
+  base_url: "https://api.kraken.com"
+  ws_url: "wss://ws.kraken.com"
+  # No credentials needed for Phases 1-5 — Kraken public endpoints require no auth.
+  # API keys are only needed for Phase 6 live trading and go in secrets/secrets.yaml.
 
 broker:
   mode: "paper"        # paper | live — change this one line to go live
 
 symbols:
-  - "ATOM-USD"
+  - "ATOM/USD"         # Kraken format: slash for WebSocket, stripped to ATOMUSD for REST
 
 timeframe: "5"         # candle size in minutes (5 = 5-minute candles)
 
 backfill:
   candle_count: 500    # how many historical candles to load on startup
-  max_per_request: 300 # Coinbase API max per request
+  max_per_request: 720 # Kraken public OHLC API max per request
 
 indicators:
   ema_fast: 9
@@ -65,9 +60,7 @@ database:
   backtest_path: "data/backtest.db"
 
 alerts:
-  discord_webhook: ""          # Discord webhook URL
-  telegram_bot_token: ""       # Telegram bot token
-  telegram_chat_id: ""         # Telegram chat ID
+  # credentials are in secrets/secrets.yaml
 
 dashboard:
   port: 5000
@@ -81,6 +74,6 @@ logging:
 backtest:
   data_path: "data/historical"      # local CSV cache directory
   initial_capital: 10000.0          # starting portfolio value in USD
-  maker_fee: 0.006                  # Coinbase Advanced Trade taker fee
-  taker_fee: 0.006
+  maker_fee: 0.0016                 # Kraken maker fee (0.16%)
+  taker_fee: 0.0026                 # Kraken taker fee (0.26%)
   slippage_pct: 0.001               # 0.1% slippage model

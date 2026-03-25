@@ -144,7 +144,7 @@ class TestVolumeIndicators:
         closes = make_series([101.0] * n)
         volumes = make_series([1000.0] * n)
         ratio = volume_ratio(opens, closes, volumes, period=20)
-        assert ratio.iloc[-1] > 1.0 or ratio.iloc[-1] != ratio.iloc[-1]
+        assert ratio.iloc[-1] > 1.0
 
 
 class TestComputeAll:
