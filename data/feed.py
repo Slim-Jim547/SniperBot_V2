@@ -1,16 +1,18 @@
 """
 data/feed.py
 
-WebSocket connection to Coinbase Advanced Trade.
-Subscribes to market_trades channel.
-Aggregates individual trades into OHLCV candles.
-Calls on_candle_close(candle) whenever a candle period completes.
+WebSocket connection to Kraken public market data.
+Subscribes to the ohlc channel for a trading pair.
+Emits a completed Candle when a new candle period begins.
+
+Kraken sends continuous OHLC updates for the current candle. When beginTime
+changes in a new message, the previous candle is complete and gets emitted.
+No authentication required.
 """
 
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
 from typing import Callable, Optional
 
 import websockets
@@ -20,101 +22,49 @@ from models import Candle
 logger = logging.getLogger(__name__)
 
 
-def parse_trade_message(msg: dict) -> list:
+def parse_ohlc_message(msg) -> Optional[dict]:
     """
-    Extract trade dicts from a Coinbase market_trades WebSocket message.
-    Returns empty list for non-trade messages.
+    Parse a Kraken WebSocket message and extract OHLC data if present.
+
+    Kraken OHLC message format:
+    [channelID, [beginTime, endTime, open, high, low, close, vwap, volume, count], "ohlc-5", "ATOM/USD"]
+
+    Dict messages are events (heartbeat, subscriptionStatus, systemStatus) — ignored.
+    Returns a dict with OHLC fields, or None for non-OHLC messages.
     """
-    if msg.get("channel") != "market_trades":
-        return []
-    trades = []
-    for event in msg.get("events", []):
-        for trade in event.get("trades", []):
-            trades.append({
-                "price": float(trade["price"]),
-                "size": float(trade["size"]),
-                "side": trade["side"],
-                "time": trade["time"],
-            })
-    return trades
+    # Event dicts (heartbeat, subscriptionStatus, etc.) — skip
+    if isinstance(msg, dict):
+        return None
+
+    # OHLC data arrives as a 4-element list
+    if not isinstance(msg, list) or len(msg) != 4:
+        return None
+
+    channel_name = msg[2]
+    if not isinstance(channel_name, str) or not channel_name.startswith("ohlc"):
+        return None
+
+    ohlc = msg[1]
+    return {
+        "begin_time": float(ohlc[0]),
+        "end_time":   float(ohlc[1]),
+        "open":       float(ohlc[2]),
+        "high":       float(ohlc[3]),
+        "low":        float(ohlc[4]),
+        "close":      float(ohlc[5]),
+        "vwap":       float(ohlc[6]),
+        "volume":     float(ohlc[7]),
+        "pair":       msg[3],
+    }
 
 
-def _candle_bucket(timestamp: int, timeframe_seconds: int) -> int:
-    """Return the start of the candle period containing this timestamp."""
-    return (timestamp // timeframe_seconds) * timeframe_seconds
-
-
-class CandleBuilder:
+class KrakenFeed:
     """
-    Aggregates individual trade ticks into OHLCV candles.
+    Manages the WebSocket connection to Kraken public market data.
+    Subscribes to the ohlc channel and emits complete Candle objects.
 
-    on_candle_close is called with the completed Candle when a new
-    timeframe period begins.
-    """
-
-    def __init__(
-        self,
-        symbol: str,
-        timeframe_minutes: int,
-        on_candle_close: Callable,
-    ):
-        self._symbol = symbol
-        self._tf_seconds = timeframe_minutes * 60
-        self._on_close = on_candle_close
-        self._bucket: Optional[int] = None
-        self.current_open: Optional[float] = None
-        self.current_high: Optional[float] = None
-        self.current_low: Optional[float] = None
-        self.current_close: Optional[float] = None
-        self.current_volume: float = 0.0
-
-    def process_trade(self, price: float, size: float, timestamp: int):
-        """Process a single trade. Fires callback if candle period rolled over."""
-        bucket = _candle_bucket(timestamp, self._tf_seconds)
-
-        if self._bucket is None:
-            # First trade ever
-            self._start_new_candle(bucket, price, size)
-            return
-
-        if bucket > self._bucket:
-            # New candle period — close current and start fresh
-            self._close_candle()
-            self._start_new_candle(bucket, price, size)
-        else:
-            # Same period — update running OHLCV
-            self.current_high = max(self.current_high, price)
-            self.current_low = min(self.current_low, price)
-            self.current_close = price
-            self.current_volume += size
-
-    def _start_new_candle(self, bucket: int, price: float, size: float):
-        self._bucket = bucket
-        self.current_open = price
-        self.current_high = price
-        self.current_low = price
-        self.current_close = price
-        self.current_volume = size
-
-    def _close_candle(self):
-        if self.current_open is None:
-            return
-        candle = Candle(
-            timestamp=self._bucket,
-            open=self.current_open,
-            high=self.current_high,
-            low=self.current_low,
-            close=self.current_close,
-            volume=self.current_volume,
-            symbol=self._symbol,
-        )
-        logger.debug(f"Candle closed: {candle}")
-        self._on_close(candle)
-
-
-class CoinbaseFeed:
-    """
-    Manages the WebSocket connection to Coinbase Advanced Trade.
+    A candle is considered complete when the next OHLC update carries a
+    different beginTime — at that point the previous candle is emitted.
     Reconnects automatically on disconnect.
     """
 
@@ -126,8 +76,13 @@ class CoinbaseFeed:
         on_candle_close: Callable,
     ):
         self._ws_url = ws_url
-        self._symbol = symbol
-        self._builder = CandleBuilder(symbol, timeframe_minutes, on_candle_close)
+        self._symbol = symbol               # e.g. "ATOM/USD"
+        self._interval = timeframe_minutes
+        self._on_close = on_candle_close
+
+        # Current candle state
+        self._last_begin_time: Optional[float] = None
+        self._current: Optional[dict] = None
 
     async def run(self):
         """Connect and stream forever. Reconnects on error."""
@@ -142,19 +97,54 @@ class CoinbaseFeed:
         logger.info(f"Connecting to {self._ws_url}")
         async with websockets.connect(self._ws_url) as ws:
             subscribe_msg = json.dumps({
-                "type": "subscribe",
-                "product_ids": [self._symbol],
-                "channel": "market_trades",
+                "event": "subscribe",
+                "pair": [self._symbol],
+                "subscription": {"name": "ohlc", "interval": self._interval},
             })
             await ws.send(subscribe_msg)
-            logger.info(f"Subscribed to market_trades for {self._symbol}")
+            logger.info(f"Subscribed to ohlc-{self._interval} for {self._symbol}")
 
             async for raw in ws:
-                msg = json.loads(raw)
-                for trade in parse_trade_message(msg):
-                    ts = int(
-                        datetime.fromisoformat(
-                            trade["time"].replace("Z", "+00:00")
-                        ).timestamp()
-                    )
-                    self._builder.process_trade(trade["price"], trade["size"], ts)
+                try:
+                    msg = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+
+                ohlc = parse_ohlc_message(msg)
+                if ohlc is None:
+                    continue
+
+                self._process_ohlc(ohlc)
+
+    def _process_ohlc(self, ohlc: dict):
+        """Process an OHLC update. Emits the previous candle when the period rolls over."""
+        begin_time = ohlc["begin_time"]
+
+        if self._last_begin_time is None:
+            # First update — initialise state, nothing to emit yet
+            self._last_begin_time = begin_time
+            self._current = ohlc
+            return
+
+        if begin_time != self._last_begin_time:
+            # New candle period started — emit the just-completed candle
+            self._emit_candle()
+            self._last_begin_time = begin_time
+
+        # Store the latest update for the current period (overwrites in-progress candle)
+        self._current = ohlc
+
+    def _emit_candle(self):
+        if self._current is None:
+            return
+        candle = Candle(
+            timestamp=int(self._last_begin_time),
+            open=self._current["open"],
+            high=self._current["high"],
+            low=self._current["low"],
+            close=self._current["close"],
+            volume=self._current["volume"],
+            symbol=self._symbol,
+        )
+        logger.debug(f"Candle closed: {candle}")
+        self._on_close(candle)

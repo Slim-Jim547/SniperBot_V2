@@ -14,8 +14,8 @@ from collections import deque
 import yaml
 import pandas as pd
 
-from data.backfill import CoinbaseBackfill
-from data.feed import CoinbaseFeed
+from data.backfill import KrakenBackfill
+from data.feed import KrakenFeed
 from data.indicators import compute_all
 from models import Candle
 from storage.trade_db import TradeDB
@@ -63,11 +63,7 @@ def run(config_path: str = "config/config.yaml"):
     logger.info("Database initialised")
 
     # ── Backfill ──────────────────────────────────────────────────────────
-    backfill = CoinbaseBackfill(
-        api_key=cfg["exchange"]["api_key"],
-        api_secret=cfg["exchange"]["api_secret"],
-        base_url=cfg["exchange"]["base_url"],
-    )
+    backfill = KrakenBackfill(base_url=cfg["exchange"]["base_url"])
     logger.info(f"Backfilling {cfg['backfill']['candle_count']} candles for {symbol}...")
     history = backfill.fetch(
         symbol=symbol,
@@ -112,7 +108,7 @@ def run(config_path: str = "config/config.yaml"):
             indicators=inds,
         )
 
-    feed = CoinbaseFeed(
+    feed = KrakenFeed(
         ws_url=cfg["exchange"]["ws_url"],
         symbol=symbol,
         timeframe_minutes=int(timeframe),

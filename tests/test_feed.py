@@ -1,117 +1,117 @@
 import pytest
 from unittest.mock import MagicMock
-from data.feed import CandleBuilder, parse_trade_message
+from data.feed import KrakenFeed, parse_ohlc_message
+from models import Candle
 
 
-TRADE_MSG_BUY = {
-    "channel": "market_trades",
-    "events": [{
-        "type": "update",
-        "trades": [{
-            "product_id": "ATOM-USD",
-            "price": "10.50",
-            "size": "5.0",
-            "side": "BUY",
-            "time": "2023-01-01T00:01:00Z",
-        }]
-    }]
-}
-
-TRADE_MSG_SELL = {
-    "channel": "market_trades",
-    "events": [{
-        "type": "update",
-        "trades": [{
-            "product_id": "ATOM-USD",
-            "price": "10.30",
-            "size": "3.0",
-            "side": "SELL",
-            "time": "2023-01-01T00:02:00Z",
-        }]
-    }]
-}
-
-
-class TestParseTradeMessage:
-    def test_parse_buy_trade(self):
-        trades = parse_trade_message(TRADE_MSG_BUY)
-        assert len(trades) == 1
-        t = trades[0]
-        assert t["price"] == 10.50
-        assert t["size"] == 5.0
-        assert t["side"] == "BUY"
-
-    def test_parse_non_trade_message_returns_empty(self):
-        msg = {"channel": "subscriptions", "events": []}
-        trades = parse_trade_message(msg)
-        assert trades == []
-
-    def test_parse_multiple_trades(self):
-        msg = {
-            "channel": "market_trades",
-            "events": [{
-                "type": "update",
-                "trades": [
-                    {"product_id": "ATOM-USD", "price": "10.0", "size": "1.0", "side": "BUY", "time": "2023-01-01T00:01:00Z"},
-                    {"product_id": "ATOM-USD", "price": "10.1", "size": "2.0", "side": "SELL", "time": "2023-01-01T00:01:01Z"},
-                ]
-            }]
-        }
-        trades = parse_trade_message(msg)
-        assert len(trades) == 2
+# Kraken OHLC message:
+# [channelID, [beginTime, endTime, open, high, low, close, vwap, volume, count], "ohlc-5", "ATOM/USD"]
+def make_ohlc_msg(
+    begin_time: float,
+    open_: float = 7.21,
+    high: float = 7.30,
+    low: float = 7.19,
+    close: float = 7.26,
+    volume: float = 100.0,
+):
+    return [
+        42,
+        [
+            str(begin_time),
+            str(begin_time + 300),
+            str(open_),
+            str(high),
+            str(low),
+            str(close),
+            "7.24",
+            str(volume),
+            10,
+        ],
+        "ohlc-5",
+        "ATOM/USD",
+    ]
 
 
-class TestCandleBuilder:
-    def test_first_trade_opens_candle(self):
+class TestParseOhlcMessage:
+    def test_parse_valid_ohlc_message(self):
+        msg = make_ohlc_msg(1616148000)
+        result = parse_ohlc_message(msg)
+        assert result is not None
+        assert result["begin_time"] == 1616148000.0
+        assert result["open"] == 7.21
+        assert result["high"] == 7.30
+        assert result["low"] == 7.19
+        assert result["close"] == 7.26
+        assert result["volume"] == 100.0
+        assert result["pair"] == "ATOM/USD"
+
+    def test_heartbeat_returns_none(self):
+        assert parse_ohlc_message({"event": "heartbeat"}) is None
+
+    def test_subscription_status_returns_none(self):
+        assert parse_ohlc_message({"event": "subscriptionStatus", "status": "subscribed"}) is None
+
+    def test_system_status_returns_none(self):
+        assert parse_ohlc_message({"event": "systemStatus", "status": "online"}) is None
+
+    def test_non_ohlc_channel_returns_none(self):
+        msg = [42, ["data"], "ticker", "ATOM/USD"]
+        assert parse_ohlc_message(msg) is None
+
+    def test_wrong_length_array_returns_none(self):
+        assert parse_ohlc_message([42, "data"]) is None
+
+
+class TestKrakenFeedOhlcProcessing:
+    def _make_feed(self):
         callback = MagicMock()
-        builder = CandleBuilder(symbol="ATOM-USD", timeframe_minutes=5, on_candle_close=callback)
+        feed = KrakenFeed("wss://ws.kraken.com", "ATOM/USD", 5, callback)
+        return feed, callback
 
-        # Timestamp = 2023-01-01 00:01:00 UTC = 1672531260
-        builder.process_trade(price=10.50, size=5.0, timestamp=1672531260)
+    def test_first_update_does_not_fire_callback(self):
+        feed, callback = self._make_feed()
+        feed._process_ohlc(parse_ohlc_message(make_ohlc_msg(1616148000)))
+        callback.assert_not_called()
 
-        assert builder.current_open == 10.50
-        assert builder.current_high == 10.50
-        assert builder.current_low == 10.50
-        assert builder.current_close == 10.50
-        assert builder.current_volume == 5.0
-        callback.assert_not_called()  # candle not closed yet
+    def test_same_period_update_does_not_fire_callback(self):
+        feed, callback = self._make_feed()
+        feed._process_ohlc(parse_ohlc_message(make_ohlc_msg(1616148000, close=7.26)))
+        feed._process_ohlc(parse_ohlc_message(make_ohlc_msg(1616148000, close=7.28)))
+        callback.assert_not_called()
 
-    def test_multiple_trades_update_ohlcv(self):
-        callback = MagicMock()
-        builder = CandleBuilder(symbol="ATOM-USD", timeframe_minutes=5, on_candle_close=callback)
-
-        builder.process_trade(price=10.00, size=1.0, timestamp=1672531260)
-        builder.process_trade(price=10.50, size=2.0, timestamp=1672531280)
-        builder.process_trade(price=9.80, size=1.5, timestamp=1672531300)
-
-        assert builder.current_open == 10.00
-        assert builder.current_high == 10.50
-        assert builder.current_low == 9.80
-        assert builder.current_close == 9.80
-        assert abs(builder.current_volume - 4.5) < 0.001
-
-    def test_new_candle_period_fires_callback(self):
-        callback = MagicMock()
-        builder = CandleBuilder(symbol="ATOM-USD", timeframe_minutes=5, on_candle_close=callback)
-
-        # Trade in minute 0
-        builder.process_trade(price=10.00, size=1.0, timestamp=1672531200)  # 00:00:00
-        # Trade in minute 6 (new 5-min candle)
-        builder.process_trade(price=10.50, size=1.0, timestamp=1672531560)  # 00:06:00
-
+    def test_new_period_fires_callback_once(self):
+        feed, callback = self._make_feed()
+        feed._process_ohlc(parse_ohlc_message(make_ohlc_msg(1616148000)))
+        feed._process_ohlc(parse_ohlc_message(make_ohlc_msg(1616148300)))  # new period
         callback.assert_called_once()
-        closed_candle = callback.call_args[0][0]
-        assert closed_candle.open == 10.00
-        assert closed_candle.close == 10.00
-        assert closed_candle.symbol == "ATOM-USD"
+
+    def test_callback_receives_candle_with_last_update_values(self):
+        """Emitted candle uses the final OHLC update before rollover."""
+        feed, callback = self._make_feed()
+
+        # Two updates for the same period — second has the final values
+        feed._process_ohlc(parse_ohlc_message(make_ohlc_msg(1616148000, close=7.26)))
+        feed._process_ohlc(parse_ohlc_message(make_ohlc_msg(1616148000, close=7.29)))
+
+        # New period triggers emit of the completed candle
+        feed._process_ohlc(parse_ohlc_message(make_ohlc_msg(1616148300)))
+
+        candle = callback.call_args[0][0]
+        assert isinstance(candle, Candle)
+        assert candle.close == 7.29
+        assert candle.timestamp == 1616148000
+        assert candle.symbol == "ATOM/USD"
+
+    def test_multiple_period_rollovers_fire_correct_count(self):
+        feed, callback = self._make_feed()
+        feed._process_ohlc(parse_ohlc_message(make_ohlc_msg(1616148000)))
+        feed._process_ohlc(parse_ohlc_message(make_ohlc_msg(1616148300)))  # emits first
+        feed._process_ohlc(parse_ohlc_message(make_ohlc_msg(1616148600)))  # emits second
+        assert callback.call_count == 2
 
     def test_callback_receives_candle_object(self):
-        from models import Candle
-        callback = MagicMock()
-        builder = CandleBuilder(symbol="ATOM-USD", timeframe_minutes=5, on_candle_close=callback)
-
-        builder.process_trade(10.00, 1.0, 1672531200)
-        builder.process_trade(10.50, 1.0, 1672531560)  # new period
-
+        feed, callback = self._make_feed()
+        feed._process_ohlc(parse_ohlc_message(make_ohlc_msg(1616148000)))
+        feed._process_ohlc(parse_ohlc_message(make_ohlc_msg(1616148300)))
         closed = callback.call_args[0][0]
         assert isinstance(closed, Candle)
