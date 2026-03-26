@@ -5,7 +5,7 @@ from storage.trade_db import TradeDB
 from models import Candle
 
 
-CFG = {"risk": {"notional_size": 100.0}}
+CFG = {"risk": {"mode": "notional", "notional_size": 100.0}}
 SYMBOL = "ATOM/USD"
 
 

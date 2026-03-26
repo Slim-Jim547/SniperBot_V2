@@ -16,6 +16,9 @@ import logging
 from enum import Enum
 from typing import Optional
 from models import Candle
+from risk.position_sizer import PositionSizer
+
+_sizer = PositionSizer()
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +66,7 @@ class StateMachine:
             # Confirmation — open the trade
             if candle.close <= 0:
                 raise ValueError(f"candle.close must be positive, got {candle.close}")
-            size = cfg["risk"]["notional_size"] / candle.close
+            size = _sizer.calculate(cfg, candle.close, broker.get_account_balance())
             broker.set_fill_price(candle.close, candle.timestamp)
             result = broker.place_order(symbol, "buy", size, "market")
             self.trade_id = db.insert_trade(
@@ -115,8 +118,10 @@ class StateMachine:
 
     def tick(self) -> None:
         """
-        Call once per candle close (after signal processing).
+        Call once per candle close (before signal processing).
         Advances the WATCHING timeout counter; returns to IDLE if expired.
+        With max_watch_candles=N, the machine waits exactly N candles after the
+        initial signal before timing out.
         """
         if self.state == TradeState.WATCHING:
             self._watch_count += 1

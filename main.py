@@ -97,6 +97,10 @@ def run(config_path: str = "config/config.yaml"):
 
         regime = regime_detector.classify(inds, cfg)
 
+        # ── Advance timeout counter before signal eval so the watch window
+        #    is exactly confirmation_candles wide (tick-before semantics).
+        state_machine.tick()
+
         # ── Entry signals ─────────────────────────────────────────────────
         if state_machine.state in (TradeState.IDLE, TradeState.WATCHING):
             for strategy in strategies:
@@ -126,8 +130,6 @@ def run(config_path: str = "config/config.yaml"):
                             f"balance=${paper_broker.get_account_balance():.2f}"
                         )
                     break
-
-        state_machine.tick()
 
         # ── Log signal to DB ──────────────────────────────────────────────
         db.insert_signal(
