@@ -1,5 +1,4 @@
-from models import Candle
-import pytest
+from models import Candle, OrderResult, Position
 
 def test_candle_creation():
     c = Candle(
@@ -18,9 +17,6 @@ def test_candle_is_bullish():
 def test_candle_is_bearish():
     c = Candle(timestamp=0, open=103.0, high=105.0, low=99.0, close=100.0, volume=500.0, symbol="ATOM-USD")
     assert c.is_bullish() is False
-
-
-from models import Candle, OrderResult, Position
 
 
 def test_order_result_fields():
