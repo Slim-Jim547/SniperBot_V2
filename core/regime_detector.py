@@ -8,7 +8,7 @@ Output: RegimeLabel enum.
 Priority order (most specific first):
   BREAKOUT  — high ADX + wide BB + volume surge
   TRENDING  — moderate-to-high ADX
-  CHOPPY    — low ADX + squeezed BB
+  CHOPPY    — low ADX (below both thresholds) + squeezed BB
   RANGING   — low ADX + normal BB width
 """
 
@@ -31,6 +31,9 @@ class RegimeDetector:
             cfg: full config dict (uses cfg["regime"] sub-section)
         Returns:
             RegimeLabel
+
+        Note: Caller must guarantee adx, bb_width_pct, and volume_ratio keys
+              are present (warm-up must be complete before calling).
         """
         adx       = indicators["adx"]
         bb_w      = indicators["bb_width_pct"]

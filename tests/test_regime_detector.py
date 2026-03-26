@@ -45,6 +45,11 @@ class TestRegimeDetector:
         inds = _inds(25, 0.05, 1.0)
         assert self.detector.classify(inds, CFG) == RegimeLabel.TRENDING
 
+    def test_breakout_at_adx_threshold(self):
+        # ADX exactly at breakout threshold with all conditions → BREAKOUT
+        inds = _inds(30, 0.05, 2.0)
+        assert self.detector.classify(inds, CFG) == RegimeLabel.BREAKOUT
+
     def test_ranging_low_adx_wide_bb(self):
         # ADX < 25, BB not squeezed
         inds = _inds(15, 0.05, 1.0)
