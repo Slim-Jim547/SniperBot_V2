@@ -9,6 +9,9 @@ exchange:
 broker:
   mode: "paper"        # paper | live — change this one line to go live
 
+paper:
+  initial_balance: 10000.0  # starting USD balance for paper trading
+
 symbols:
   - "ATOM/USD"         # Kraken format: slash for WebSocket, stripped to ATOMUSD for REST
 

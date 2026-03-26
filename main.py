@@ -1,9 +1,8 @@
 """
-main.py — Phase 1 entry point
+main.py — Phase 2 entry point
 
-Wires: config -> backfill -> feed -> indicators -> storage
-On each candle close: computes all indicators, logs to DB, prints summary.
-Nothing trades in Phase 1.
+Wires: config → backfill → feed → indicators → regime → strategies → state machine → paper broker → storage
+On each candle close: classifies regime, checks entry/exit signals, opens/closes paper trades, logs all.
 """
 
 import asyncio
@@ -19,6 +18,11 @@ from data.feed import KrakenFeed
 from data.indicators import compute_all
 from models import Candle
 from storage.trade_db import TradeDB
+from core.regime_detector import RegimeDetector
+from core.state_machine import StateMachine, TradeState
+from execution.paper_broker import PaperBroker
+from strategies.momentum import MomentumStrategy
+from strategies.trend_follow import TrendFollowStrategy
 
 
 def load_config(path: str = "config/config.yaml") -> dict:
@@ -63,6 +67,15 @@ def run(config_path: str = "config/config.yaml"):
     db.create_tables()
     logger.info("Database initialised")
 
+    # ── Phase 2 components ────────────────────────────────────────────────
+    regime_detector = RegimeDetector()
+    state_machine = StateMachine()
+    paper_broker = PaperBroker(initial_balance=cfg["paper"]["initial_balance"])
+    strategies = [MomentumStrategy(), TrendFollowStrategy()]
+    logger.info(
+        f"Paper broker initialised | balance=${paper_broker.get_account_balance():.2f}"
+    )
+
     # ── Backfill ──────────────────────────────────────────────────────────
     backfill = KrakenBackfill(base_url=cfg["exchange"]["base_url"])
     logger.info(f"Backfilling {cfg['backfill']['candle_count']} candles for {symbol}...")
@@ -75,38 +88,65 @@ def run(config_path: str = "config/config.yaml"):
     candle_buffer = deque(history, maxlen=cfg["backfill"]["candle_count"] + 200)
     logger.info(f"Backfill complete: {len(candle_buffer)} candles loaded")
 
-    # Print indicators from backfill data
-    opens, highs, lows, closes, volumes = candles_to_series(list(candle_buffer))
-    indicators = compute_all(opens, highs, lows, closes, volumes, cfg["indicators"])
-    logger.info("=== Indicators on last backfilled candle ===")
-    for name, value in indicators.items():
-        logger.info(f"  {name:15s}: {value:.4f}")
-
     # ── Live feed ─────────────────────────────────────────────────────────
     def on_candle_close(candle: Candle):
         candle_buffer.append(candle)
         opens, highs, lows, closes, volumes = candles_to_series(list(candle_buffer))
         inds = compute_all(opens, highs, lows, closes, volumes, cfg["indicators"])
+        inds["close"] = candle.close  # strategies need current close price
 
-        print(
-            f"[{symbol}] close={candle.close:.4f} "
-            f"ema_fast={inds['ema_fast']:.4f} "
-            f"ema_slow={inds['ema_slow']:.4f} "
-            f"rsi={inds['rsi']:.1f} "
-            f"adx={inds['adx']:.1f} "
-            f"atr={inds['atr']:.4f} "
-            f"bb_w={inds['bb_width_pct']:.4f}"
-        )
+        regime = regime_detector.classify(inds, cfg)
 
+        # ── Entry signals ─────────────────────────────────────────────────
+        if state_machine.state in (TradeState.IDLE, TradeState.WATCHING):
+            for strategy in strategies:
+                if strategy.should_enter(inds, regime, cfg):
+                    opened = state_machine.on_entry_signal(
+                        strategy.name, candle, paper_broker, db, cfg, symbol, regime.value
+                    )
+                    if opened:
+                        logger.info(
+                            f"TRADE OPENED | strategy={strategy.name} "
+                            f"regime={regime.value} price={candle.close:.4f} "
+                            f"balance=${paper_broker.get_account_balance():.2f}"
+                        )
+                    break  # only one strategy triggers per candle
+
+        # ── Exit signals ──────────────────────────────────────────────────
+        elif state_machine.state == TradeState.IN_TRADE:
+            active_name = state_machine.active_strategy_name
+            for strategy in strategies:
+                if strategy.name == active_name:
+                    position = paper_broker.get_position(symbol)
+                    if strategy.should_exit(inds, regime, position, cfg):
+                        state_machine.on_exit_signal(candle, paper_broker, db, symbol)
+                        logger.info(
+                            f"TRADE CLOSED | strategy={active_name} "
+                            f"regime={regime.value} price={candle.close:.4f} "
+                            f"balance=${paper_broker.get_account_balance():.2f}"
+                        )
+                    break
+
+        state_machine.tick()
+
+        # ── Log signal to DB ──────────────────────────────────────────────
         db.insert_signal(
             symbol=symbol,
-            strategy="none",
-            regime="unknown",
+            strategy=state_machine.active_strategy_name or "none",
+            regime=regime.value,
             signal_type="candle_close",
             blocked=False,
             block_reason=None,
             timestamp=candle.timestamp,
             indicators=inds,
+        )
+
+        logger.info(
+            f"[{symbol}] close={candle.close:.4f} regime={regime.value} "
+            f"state={state_machine.state.value} adx={inds['adx']:.1f} "
+            f"rsi={inds['rsi']:.1f} bb_w={inds['bb_width_pct']:.4f} "
+            f"ema_fast={inds['ema_fast']:.4f} ema_slow={inds['ema_slow']:.4f} "
+            f"balance=${paper_broker.get_account_balance():.2f}"
         )
 
     feed = KrakenFeed(
