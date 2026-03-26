@@ -69,7 +69,7 @@ def run(config_path: str = "config/config.yaml"):
 
     # ── Phase 2 components ────────────────────────────────────────────────
     regime_detector = RegimeDetector()
-    state_machine = StateMachine()
+    state_machine = StateMachine(max_watch_candles=cfg["strategies"]["confirmation_candles"])
     paper_broker = PaperBroker(initial_balance=cfg["paper"]["initial_balance"])
     strategies = [MomentumStrategy(), TrendFollowStrategy()]
     logger.info(

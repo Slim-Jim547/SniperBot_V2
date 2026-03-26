@@ -36,7 +36,7 @@ class TrendFollowStrategy(BaseStrategy):
         if indicators["adx"] < tf_cfg["adx_min"]:
             return False
 
-        if indicators["rsi"] >= 70:
+        if indicators["rsi"] >= tf_cfg["rsi_overbought"]:
             return False
 
         return True

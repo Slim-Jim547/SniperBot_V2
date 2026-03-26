@@ -28,14 +28,12 @@ class TradeState(Enum):
 
 
 class StateMachine:
-    # TODO: move to cfg["strategies"]["confirmation_candles"] — CLAUDE.md requires no hardcoded values
-    MAX_WATCH_CANDLES = 3  # auto-cancel WATCHING after this many ticks with no confirmation
-
-    def __init__(self):
+    def __init__(self, max_watch_candles: int = 3):
         self.state: TradeState = TradeState.IDLE
         self._strategy_name: Optional[str] = None
         self._watch_count: int = 0
         self.trade_id: Optional[int] = None
+        self._max_watch_candles: int = max_watch_candles
 
     @property
     def active_strategy_name(self) -> Optional[str]:
@@ -122,7 +120,7 @@ class StateMachine:
         """
         if self.state == TradeState.WATCHING:
             self._watch_count += 1
-            if self._watch_count >= self.MAX_WATCH_CANDLES:
+            if self._watch_count >= self._max_watch_candles:
                 self.state = TradeState.IDLE
                 self._strategy_name = None
                 self._watch_count = 0

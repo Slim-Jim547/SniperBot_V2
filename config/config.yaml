@@ -47,6 +47,7 @@ strategies:
   trend_follow:
     ema_alignment_required: true    # fast > slow > trend required
     adx_min: 25                     # minimum ADX for entry
+    rsi_overbought: 70              # RSI at or above this → skip entry
 
 risk:
   mode: "risk_pct"             # risk_pct | notional

@@ -112,6 +112,7 @@ TF_CFG = {
         "trend_follow": {
             "ema_alignment_required": True,
             "adx_min": 25,
+            "rsi_overbought": 70,
         }
     }
 }
