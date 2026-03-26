@@ -102,3 +102,76 @@ class TestMomentumStrategy:
 
     def test_strategy_name(self):
         assert self.strategy.name == "momentum"
+
+
+from strategies.trend_follow import TrendFollowStrategy
+
+
+TF_CFG = {
+    "strategies": {
+        "trend_follow": {
+            "ema_alignment_required": True,
+            "adx_min": 25,
+        }
+    }
+}
+
+
+def _tf_inds(ema_fast=10.0, ema_slow=9.0, ema_trend=8.0, adx=30.0, rsi=60.0):
+    return {
+        "ema_fast": ema_fast,
+        "ema_slow": ema_slow,
+        "ema_trend": ema_trend,
+        "adx": adx,
+        "rsi": rsi,
+    }
+
+
+class TestTrendFollowStrategy:
+    def setup_method(self):
+        self.strategy = TrendFollowStrategy()
+
+    def test_enter_with_all_conditions_met(self):
+        inds = _tf_inds(ema_fast=10, ema_slow=9, ema_trend=8, adx=30, rsi=60)
+        assert self.strategy.should_enter(inds, RegimeLabel.TRENDING, TF_CFG) is True
+
+    def test_no_entry_wrong_regime(self):
+        inds = _tf_inds()
+        assert self.strategy.should_enter(inds, RegimeLabel.BREAKOUT, TF_CFG) is False
+
+    def test_no_entry_fast_below_slow(self):
+        inds = _tf_inds(ema_fast=8, ema_slow=9, ema_trend=7)  # fast < slow
+        assert self.strategy.should_enter(inds, RegimeLabel.TRENDING, TF_CFG) is False
+
+    def test_no_entry_slow_below_trend(self):
+        inds = _tf_inds(ema_fast=10, ema_slow=7, ema_trend=9)  # slow < trend
+        assert self.strategy.should_enter(inds, RegimeLabel.TRENDING, TF_CFG) is False
+
+    def test_no_entry_adx_too_low(self):
+        inds = _tf_inds(adx=20)  # below adx_min=25
+        assert self.strategy.should_enter(inds, RegimeLabel.TRENDING, TF_CFG) is False
+
+    def test_no_entry_adx_at_minimum_passes(self):
+        inds = _tf_inds(adx=25)  # exactly at threshold
+        assert self.strategy.should_enter(inds, RegimeLabel.TRENDING, TF_CFG) is True
+
+    def test_no_entry_rsi_overbought(self):
+        inds = _tf_inds(rsi=70)  # overbought
+        assert self.strategy.should_enter(inds, RegimeLabel.TRENDING, TF_CFG) is False
+
+    def test_entry_rsi_just_below_overbought(self):
+        inds = _tf_inds(rsi=69)
+        assert self.strategy.should_enter(inds, RegimeLabel.TRENDING, TF_CFG) is True
+
+    def test_exit_when_fast_crosses_below_slow(self):
+        pos = Position("ATOM/USD", "long", 10.0, 7.0, 1_000)
+        inds = _tf_inds(ema_fast=8, ema_slow=9)
+        assert self.strategy.should_exit(inds, RegimeLabel.TRENDING, pos, TF_CFG) is True
+
+    def test_no_exit_when_still_aligned(self):
+        pos = Position("ATOM/USD", "long", 10.0, 7.0, 1_000)
+        inds = _tf_inds(ema_fast=10, ema_slow=9)
+        assert self.strategy.should_exit(inds, RegimeLabel.TRENDING, pos, TF_CFG) is False
+
+    def test_strategy_name(self):
+        assert self.strategy.name == "trend_follow"
