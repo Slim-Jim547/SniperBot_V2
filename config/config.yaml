@@ -37,6 +37,7 @@ regime:
   volume_surge_ratio: 1.5       # volume / volume_ma above this → surge
 
 strategies:
+  confirmation_candles: 3          # candles to confirm an entry signal (WATCHING timeout)
   momentum:
     bb_squeeze_periods: 5           # candles BB must be squeezed before breakout
     breakout_atr_multiplier: 0.5    # price must move this many ATRs from BB mid

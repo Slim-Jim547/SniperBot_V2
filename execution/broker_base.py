@@ -41,3 +41,13 @@ class BrokerBase(ABC):
     def cancel_order(self, order_id: str) -> bool:
         """Cancel an unfilled order. Returns True if found and cancelled."""
         ...
+
+    @abstractmethod
+    def set_fill_price(self, price: float, timestamp: int) -> None:
+        """
+        Inform the broker of the current candle's close price before placing orders.
+        Paper: uses this price for all fills.
+        Live: may be used for slippage modeling or ignored; actual fill price
+              comes back from the exchange via OrderResult.fill_price.
+        """
+        ...

@@ -105,3 +105,14 @@ class TestStateMachine:
         # Should not raise, just be a no-op
         self.sm.on_exit_signal(self.candle, self.broker, self.db, SYMBOL)
         assert self.sm.state == TradeState.IDLE
+
+    def test_exit_with_no_position_logs_error_and_resets(self, caplog):
+        import logging
+        self.sm.on_entry_signal("momentum", self.candle, self.broker, self.db, CFG, SYMBOL, "BREAKOUT")
+        self.sm.on_entry_signal("momentum", self.candle, self.broker, self.db, CFG, SYMBOL, "BREAKOUT")
+        # Manually clear the broker position to simulate inconsistency
+        self.broker._positions.clear()
+        with caplog.at_level(logging.ERROR, logger="core.state_machine"):
+            self.sm.on_exit_signal(self.candle, self.broker, self.db, SYMBOL)
+        assert self.sm.state == TradeState.IDLE  # still resets state
+        assert "no position found" in caplog.text.lower()

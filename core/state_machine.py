@@ -12,9 +12,12 @@ States:
     CLOSING   → exit order placed (transient; resolves to IDLE instantly in paper mode)
 """
 
+import logging
 from enum import Enum
 from typing import Optional
 from models import Candle
+
+logger = logging.getLogger(__name__)
 
 
 class TradeState(Enum):
@@ -25,6 +28,7 @@ class TradeState(Enum):
 
 
 class StateMachine:
+    # TODO: move to cfg["strategies"]["confirmation_candles"] — CLAUDE.md requires no hardcoded values
     MAX_WATCH_CANDLES = 3  # auto-cancel WATCHING after this many ticks with no confirmation
 
     def __init__(self):
@@ -59,6 +63,8 @@ class StateMachine:
 
         if self.state == TradeState.WATCHING and self._strategy_name == strategy_name:
             # Confirmation — open the trade
+            if candle.close <= 0:
+                raise ValueError(f"candle.close must be positive, got {candle.close}")
             size = cfg["risk"]["notional_size"] / candle.close
             broker.set_fill_price(candle.close, candle.timestamp)
             result = broker.place_order(symbol, "buy", size, "market")
@@ -94,7 +100,12 @@ class StateMachine:
 
         self.state = TradeState.CLOSING
         position = broker.get_position(symbol)
-        if position:
+        if position is None:
+            logger.error(
+                "on_exit_signal called but no position found for %s — "
+                "trade %s will remain open in DB", symbol, self.trade_id
+            )
+        else:
             broker.set_fill_price(candle.close, candle.timestamp)
             result = broker.place_order(symbol, "sell", position.size, "market")
             pnl = (result.fill_price - position.entry_price) * position.size
