@@ -27,6 +27,10 @@ class PaperBroker(BrokerBase):
     def place_order(
         self, symbol: str, side: str, size: float, order_type: str
     ) -> OrderResult:
+        # order_type is accepted for interface compatibility but ignored in paper mode —
+        # all fills execute at set_fill_price() regardless of order type.
+        if self._fill_price == 0.0:
+            raise RuntimeError("set_fill_price() must be called before place_order()")
         self._order_counter += 1
         order_id = f"paper_{self._order_counter}"
 
@@ -41,6 +45,10 @@ class PaperBroker(BrokerBase):
                 entry_time=self._fill_timestamp,
             )
         else:  # sell
+            position = self._positions.get(symbol)
+            if position is None:
+                raise ValueError(f"No open position for {symbol} — cannot sell")
+            size = min(size, position.size)  # clamp to position size
             proceeds = size * self._fill_price
             self._balance += proceeds
             self._positions.pop(symbol, None)
@@ -63,6 +71,8 @@ class PaperBroker(BrokerBase):
         return self._balance
 
     def cancel_order(self, order_id: str) -> bool:
+        """Paper mode: removes the order record only. Balance and position are NOT
+        reversed — fills are instant and cannot be undone."""
         if order_id in self._orders:
             del self._orders[order_id]
             return True

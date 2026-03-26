@@ -60,3 +60,18 @@ class TestPaperBroker:
         self.broker.set_fill_price(100.0, 1_001)
         r2 = self.broker.place_order("ATOM/USD", "sell", 5.0, "market")
         assert r1.order_id != r2.order_id
+
+    def test_sell_without_position_raises(self):
+        with pytest.raises(ValueError, match="No open position"):
+            self.broker.place_order("ATOM/USD", "sell", 10.0, "market")
+
+    def test_place_order_before_set_fill_price_raises(self):
+        broker = PaperBroker(initial_balance=10_000.0)
+        with pytest.raises(RuntimeError, match="set_fill_price"):
+            broker.place_order("ATOM/USD", "buy", 10.0, "market")
+
+    def test_cancel_order_does_not_reverse_position(self):
+        result = self.broker.place_order("ATOM/USD", "buy", 10.0, "market")
+        self.broker.cancel_order(result.order_id)
+        # Position should still exist — cancel only removes the order record
+        assert self.broker.get_position("ATOM/USD") is not None
