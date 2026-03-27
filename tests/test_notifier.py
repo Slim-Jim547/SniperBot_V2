@@ -109,6 +109,14 @@ class TestNotifier:
             n.send("hello")
         mock_post.assert_not_called()
 
+    def test_from_secrets_malformed_yaml_returns_silent_notifier(self, tmp_path):
+        secrets_file = tmp_path / "secrets.yaml"
+        secrets_file.write_text(": this is: not valid yaml: [\n")
+        n = Notifier.from_secrets(str(secrets_file))
+        with patch("alerts.notifier.requests.post") as mock_post:
+            n.send("hello")
+        mock_post.assert_not_called()
+
     # --- Message content ---
 
     def test_send_trade_opened_includes_key_fields(self):
@@ -124,6 +132,7 @@ class TestNotifier:
         assert "momentum" in msg
         assert "7.2500" in msg
         assert "6.8100" in msg
+        assert "BREAKOUT" in msg
 
     def test_send_trade_closed_includes_pnl(self):
         notifier = Notifier("https://discord.example/wh", None, None)

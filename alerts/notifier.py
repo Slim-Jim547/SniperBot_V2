@@ -38,8 +38,8 @@ class Notifier:
         try:
             with open(secrets_path) as f:
                 secrets = yaml.safe_load(f) or {}
-        except FileNotFoundError:
-            logger.warning("secrets.yaml not found at %s — alerts disabled", secrets_path)
+        except (OSError, yaml.YAMLError) as exc:
+            logger.warning("Could not load secrets from %s: %s — alerts disabled", secrets_path, type(exc).__name__)
             return cls(None, None, None)
         alerts = secrets.get("alerts") or {}
         return cls(
@@ -91,7 +91,7 @@ class Notifier:
             )
             resp.raise_for_status()
         except Exception as exc:
-            logger.warning("Discord notification failed: %s", exc)
+            logger.warning("Discord notification failed: %s", type(exc).__name__)
 
     def _send_telegram(self, message: str) -> None:
         if not self._telegram_token or not self._telegram_chat_id:
@@ -105,4 +105,4 @@ class Notifier:
             )
             resp.raise_for_status()
         except Exception as exc:
-            logger.warning("Telegram notification failed: %s", exc)
+            logger.warning("Telegram notification failed: %s", type(exc).__name__)
