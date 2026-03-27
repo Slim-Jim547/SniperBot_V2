@@ -162,8 +162,7 @@ def run(config_path: str = "config/config.yaml"):
                         break
 
             if exit_reason and position is not None:
-                exit_pnl = (candle.close - position.entry_price) * position.size
-                state_machine.on_exit_signal(candle, paper_broker, db, symbol)
+                exit_pnl = state_machine.on_exit_signal(candle, paper_broker, db, symbol) or 0.0
                 trade_manager.close_trade()
                 circuit_breaker.record_trade(db, exit_pnl, candle.timestamp)
                 notifier.send_trade_closed(symbol, exit_pnl, candle.close, exit_reason)

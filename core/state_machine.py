@@ -91,16 +91,19 @@ class StateMachine:
         broker,
         db,
         symbol: str,
-    ) -> None:
+    ) -> Optional[float]:
         """
         Call when the active strategy's should_exit() returns True.
         Closes the position and returns to IDLE.
+        Returns the realised PnL when a position is closed, or None if no
+        position was found (broker/state mismatch).
         """
         if self.state != TradeState.IN_TRADE or self.trade_id is None:
-            return
+            return None
 
         self.state = TradeState.CLOSING
         position = broker.get_position(symbol)
+        pnl: Optional[float] = None
         if position is None:
             logger.error(
                 "on_exit_signal called but no position found for %s — "
@@ -115,6 +118,7 @@ class StateMachine:
         self.trade_id = None
         self._strategy_name = None
         self.state = TradeState.IDLE
+        return pnl
 
     def tick(self) -> None:
         """
