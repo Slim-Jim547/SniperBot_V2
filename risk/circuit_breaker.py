@@ -50,7 +50,7 @@ class CircuitBreaker:
 
         last_loss_ts = int(db.get_state(_KEY_LAST_LOSS_TS) or "0")
         cooldown_secs = risk["cooldown_minutes"] * 60
-        if last_loss_ts > 0 and last_loss_ts < current_ts:
+        if last_loss_ts > 0:
             elapsed = current_ts - last_loss_ts
             if elapsed < cooldown_secs:
                 remaining = cooldown_secs - elapsed

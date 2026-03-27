@@ -55,7 +55,9 @@ class TestCircuitBreaker:
     def test_allows_when_loss_below_limit(self):
         # $250 loss < $300 limit
         self.cb.record_trade(self.db, pnl=-250.0, current_ts=self.ts)
-        allowed, _ = self.cb.check(self.db, self.cfg, 10000.0, self.ts)
+        cooldown_secs = self.cfg["risk"]["cooldown_minutes"] * 60
+        # Check after cooldown expires to isolate the loss limit check
+        allowed, _ = self.cb.check(self.db, self.cfg, 10000.0, self.ts + cooldown_secs + 1)
         assert allowed
 
     def test_winning_trade_does_not_set_cooldown(self):
@@ -112,3 +114,10 @@ class TestCircuitBreaker:
         self.cb.record_trade(self.db, pnl=-100.0, current_ts=self.ts)
         self.cb.record_trade(self.db, pnl=-50.0, current_ts=self.ts)
         assert float(self.db.get_state("cb_daily_loss_usd")) == pytest.approx(150.0)
+
+    def test_cooldown_blocks_at_same_timestamp(self):
+        self.cb.record_trade(self.db, pnl=-10.0, current_ts=self.ts)
+        # Check at the exact same timestamp as the loss — should still be in cooldown
+        allowed, reason = self.cb.check(self.db, self.cfg, 10000.0, self.ts)
+        assert not allowed
+        assert "cooldown" in reason
