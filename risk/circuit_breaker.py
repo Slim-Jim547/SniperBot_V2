@@ -73,7 +73,7 @@ class CircuitBreaker:
         """Reset daily counters if the UTC date has changed."""
         today = _today_utc()
         if db.get_state(_KEY_DATE) != today:
-            db.set_state(_KEY_DATE, today)
             db.set_state(_KEY_TRADES, "0")
             db.set_state(_KEY_LOSS, "0.0")
             db.set_state(_KEY_LAST_LOSS_TS, "0")
+            db.set_state(_KEY_DATE, today)
