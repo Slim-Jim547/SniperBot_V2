@@ -245,6 +245,12 @@ class BacktestEngine:
                     state_machine.on_exit_signal(candle, broker, db, symbol)
                     trade_manager.close_trade()
 
+        # ── Force-close any open position at end of replay ────────────────
+        if replay_candles and state_machine.state == TradeState.IN_TRADE:
+            logger.warning("Replay ended with open position — force-closing at last candle close")
+            state_machine.on_exit_signal(candle, broker, db, symbol)
+            trade_manager.close_trade()
+
         # ── Metrics ───────────────────────────────────────────────────────
         closed_trades = db.get_closed_trades()
         db.close()
