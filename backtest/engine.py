@@ -124,6 +124,8 @@ def _print_results(
     pf_str = f"{pf:.2f}" if pf != math.inf else "∞"
     pnl_pct = (final_balance - initial_capital) / initial_capital * 100
 
+    # Note: win/loss metrics use DB PnL (includes slippage, excludes fees).
+    # Final balance reflects fees deducted by BacktestBroker.
     print("\n=== Backtest Results ===")
     print(f"Candles replayed : {replayed}  (warm-up: {warmup})")
     print(f"Trades           : {total}")

@@ -1,9 +1,10 @@
 """
-main.py — Phase 3 entry point
+main.py — Phase 4 entry point
 
 Wires: config → backfill → feed → indicators → regime → strategies
        → circuit_breaker → state_machine → paper_broker → trade_manager
        → circuit_breaker.record → notifier → storage
+       → BacktestEngine (--backtest flag)
 """
 
 import asyncio
