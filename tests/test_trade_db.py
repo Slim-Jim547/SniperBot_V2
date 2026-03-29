@@ -82,3 +82,30 @@ class TestBotState:
         db.set_state("daily_trades", "3")
         db.set_state("daily_trades", "4")
         assert db.get_state("daily_trades") == "4"
+
+
+class TestGetClosedTrades:
+    def test_returns_empty_when_no_trades(self, db):
+        assert db.get_closed_trades() == []
+
+    def test_returns_only_closed_trades(self, db):
+        # open trade — should NOT appear
+        db.insert_trade("ATOM/USD", "momentum", "BREAKOUT", "buy", 10.0, 100.0, 1000)
+        # closed trade — should appear
+        trade_id = db.insert_trade("ATOM/USD", "trend_follow", "TRENDING", "buy", 10.0, 100.0, 2000)
+        db.close_trade(trade_id, 11.0, 3000, 100.0)
+
+        closed = db.get_closed_trades()
+        assert len(closed) == 1
+        assert closed[0]["id"] == trade_id
+        assert closed[0]["pnl"] == pytest.approx(100.0)
+
+    def test_returns_trades_ordered_by_exit_time(self, db):
+        id1 = db.insert_trade("ATOM/USD", "momentum", "BREAKOUT", "buy", 10.0, 100.0, 1000)
+        id2 = db.insert_trade("ATOM/USD", "momentum", "BREAKOUT", "buy", 10.0, 100.0, 2000)
+        db.close_trade(id1, 11.0, 5000, 100.0)
+        db.close_trade(id2, 11.0, 3000, 100.0)  # earlier exit time
+
+        closed = db.get_closed_trades()
+        assert closed[0]["id"] == id2  # exit_time=3000 comes first
+        assert closed[1]["id"] == id1  # exit_time=5000 comes second

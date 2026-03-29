@@ -128,6 +128,14 @@ class TradeDB:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_closed_trades(self) -> list:
+        """Return all closed trades ordered by exit_time ascending."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM trades WHERE status='closed' ORDER BY exit_time ASC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     # ── Signals ───────────────────────────────────────────────────────────
 
     def insert_signal(
