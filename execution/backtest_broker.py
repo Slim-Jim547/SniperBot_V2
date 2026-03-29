@@ -45,6 +45,8 @@ class BacktestBroker(BrokerBase):
             fill_price = self._fill_price * (1.0 + self._slippage_pct)
             notional = fill_price * size
             fee = notional * fee_rate
+            if self._balance < notional + fee:
+                raise ValueError("Insufficient balance")
             self._balance -= notional + fee
             self._position = Position(
                 symbol=symbol,
@@ -54,6 +56,8 @@ class BacktestBroker(BrokerBase):
                 entry_time=self._fill_timestamp,
             )
         else:  # sell
+            if self._position is None:
+                raise ValueError(f"No open position for {symbol} — cannot sell")
             fill_price = self._fill_price * (1.0 - self._slippage_pct)
             notional = fill_price * size
             fee = notional * fee_rate

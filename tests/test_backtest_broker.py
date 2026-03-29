@@ -84,6 +84,19 @@ class TestSellFill:
         assert broker.get_position("ATOM/USD") is None
 
 
+class TestGuards:
+    def test_sell_without_position_raises(self, broker):
+        broker.set_fill_price(10.0, 1000)
+        with pytest.raises(ValueError, match="No open position"):
+            broker.place_order("ATOM/USD", "sell", 100.0, "market")
+
+    def test_buy_with_insufficient_balance_raises(self, broker):
+        # Balance is 10000; try to buy an amount that exceeds it
+        broker.set_fill_price(200.0, 1000)
+        with pytest.raises(ValueError, match="Insufficient balance"):
+            broker.place_order("ATOM/USD", "buy", 1000.0, "market")
+
+
 class TestFeeSelection:
     def test_limit_order_uses_maker_fee(self):
         broker_limit = BacktestBroker(10000.0, 0.0016, 0.0026, 0.001)
