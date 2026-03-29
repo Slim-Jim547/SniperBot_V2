@@ -113,6 +113,35 @@ class TestGuards:
             broker.place_order("ATOM/USD", "buy", 50.0, "market")
 
 
+class TestValidation:
+    def test_place_order_without_fill_price_raises(self, broker):
+        # _fill_price defaults to 0.0 — must call set_fill_price() first
+        with pytest.raises(ValueError, match="fill_price not set"):
+            broker.place_order("ATOM/USD", "buy", 100.0, "market")
+
+    def test_place_order_zero_size_raises(self, broker):
+        broker.set_fill_price(10.0, 1000)
+        with pytest.raises(ValueError, match="size must be positive"):
+            broker.place_order("ATOM/USD", "buy", 0.0, "market")
+
+    def test_place_order_negative_size_raises(self, broker):
+        broker.set_fill_price(10.0, 1000)
+        with pytest.raises(ValueError, match="size must be positive"):
+            broker.place_order("ATOM/USD", "buy", -5.0, "market")
+
+    def test_place_order_unknown_side_raises(self, broker):
+        broker.set_fill_price(10.0, 1000)
+        with pytest.raises(ValueError, match="Unknown side"):
+            broker.place_order("ATOM/USD", "long", 100.0, "market")
+
+    def test_sell_size_mismatch_raises(self, broker):
+        broker.set_fill_price(10.0, 1000)
+        broker.place_order("ATOM/USD", "buy", 100.0, "market")
+        broker.set_fill_price(11.0, 2000)
+        with pytest.raises(ValueError, match="does not match open position size"):
+            broker.place_order("ATOM/USD", "sell", 50.0, "market")
+
+
 class TestFeeSelection:
     def test_limit_order_uses_maker_fee(self):
         broker_limit = BacktestBroker(10000.0, 0.0016, 0.0026, 0.001)

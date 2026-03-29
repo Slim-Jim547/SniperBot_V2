@@ -39,6 +39,13 @@ class BacktestBroker(BrokerBase):
     def place_order(
         self, symbol: str, side: str, size: float, order_type: str
     ) -> OrderResult:
+        if self._fill_price <= 0:
+            raise ValueError("fill_price not set — call set_fill_price() before place_order()")
+        if size <= 0:
+            raise ValueError(f"size must be positive, got {size}")
+        if side not in ("buy", "sell"):
+            raise ValueError(f"Unknown side: {side!r}")
+
         fee_rate = self._taker_fee if order_type == "market" else self._maker_fee
 
         if side == "buy":
@@ -65,6 +72,10 @@ class BacktestBroker(BrokerBase):
                 raise ValueError(f"No open position for {symbol} — cannot sell")
             if self._position.symbol != symbol:
                 raise ValueError(f"No open position for {symbol}")
+            if size != self._position.size:
+                raise ValueError(
+                    f"Sell size {size} does not match open position size {self._position.size}"
+                )
             fill_price = self._fill_price * (1.0 - self._slippage_pct)
             notional = fill_price * size
             fee = notional * fee_rate
