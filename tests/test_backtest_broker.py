@@ -96,6 +96,22 @@ class TestGuards:
         with pytest.raises(ValueError, match="Insufficient balance"):
             broker.place_order("ATOM/USD", "buy", 1000.0, "market")
 
+    def test_sell_symbol_mismatch_raises(self, broker):
+        # Open a position for ATOM/USD, then try to sell ETH/USD
+        broker.set_fill_price(10.0, 1000)
+        broker.place_order("ATOM/USD", "buy", 100.0, "market")
+        broker.set_fill_price(11.0, 2000)
+        with pytest.raises(ValueError, match="No open position for ETH/USD"):
+            broker.place_order("ETH/USD", "sell", 100.0, "market")
+
+    def test_duplicate_buy_raises(self, broker):
+        # Open a position, then try to open another without closing first
+        broker.set_fill_price(10.0, 1000)
+        broker.place_order("ATOM/USD", "buy", 100.0, "market")
+        broker.set_fill_price(11.0, 2000)
+        with pytest.raises(ValueError, match="Position already open"):
+            broker.place_order("ATOM/USD", "buy", 50.0, "market")
+
 
 class TestFeeSelection:
     def test_limit_order_uses_maker_fee(self):

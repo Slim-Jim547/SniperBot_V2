@@ -42,6 +42,11 @@ class BacktestBroker(BrokerBase):
         fee_rate = self._taker_fee if order_type == "market" else self._maker_fee
 
         if side == "buy":
+            if self._position is not None:
+                raise ValueError(
+                    f"Position already open for {self._position.symbol}"
+                    f" — close it before opening a new one"
+                )
             fill_price = self._fill_price * (1.0 + self._slippage_pct)
             notional = fill_price * size
             fee = notional * fee_rate
@@ -58,6 +63,8 @@ class BacktestBroker(BrokerBase):
         else:  # sell
             if self._position is None:
                 raise ValueError(f"No open position for {symbol} — cannot sell")
+            if self._position.symbol != symbol:
+                raise ValueError(f"No open position for {symbol}")
             fill_price = self._fill_price * (1.0 - self._slippage_pct)
             notional = fill_price * size
             fee = notional * fee_rate
