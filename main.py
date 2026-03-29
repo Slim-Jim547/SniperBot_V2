@@ -210,4 +210,13 @@ def run(config_path: str = "config/config.yaml"):
 
 
 if __name__ == "__main__":
-    run()
+    import argparse
+    parser = argparse.ArgumentParser(description="SniperBot V2")
+    parser.add_argument("--backtest", action="store_true", help="Run backtest instead of live feed")
+    args = parser.parse_args()
+
+    if args.backtest:
+        from backtest.engine import BacktestEngine
+        BacktestEngine(load_config()).run()
+    else:
+        run()

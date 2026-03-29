@@ -76,6 +76,7 @@ logging:
 
 # Phase 4 — Backtest Engine
 backtest:
+  candle_count: 2000            # total candles to fetch (warm-up + replay)
   data_path: "data/historical"      # local CSV cache directory
   initial_capital: 10000.0          # starting portfolio value in USD
   maker_fee: 0.0016                 # Kraken maker fee (0.16%)
