@@ -83,7 +83,12 @@ class KrakenBackfill:
         symbol: canonical slash format, e.g. "ATOM/USD"
         Returns candles sorted oldest -> newest.
         """
-        candle_seconds = _SECONDS_PER_CANDLE[timeframe]
+        candle_seconds = _SECONDS_PER_CANDLE.get(timeframe)
+        if candle_seconds is None:
+            raise ValueError(
+                f"Unsupported timeframe '{timeframe}'. "
+                f"Supported: {list(_SECONDS_PER_CANDLE.keys())}"
+            )
         interval = int(timeframe)
         pair = symbol.replace("/", "")          # "ATOM/USD" -> "ATOMUSD"
         chunk_limit = min(max_per_request, _KRAKEN_MAX_CANDLES)
@@ -119,5 +124,5 @@ class KrakenBackfill:
 
         # Return only the most recent `count` candles
         result = unique[-count:] if len(unique) > count else unique
-        logger.info(f"Backfilled {len(result)} candles for {symbol}")
+        logger.info("Backfilled %s candles for %s", len(result), symbol)
         return result

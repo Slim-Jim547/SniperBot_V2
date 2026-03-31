@@ -11,6 +11,16 @@ import numpy as np
 import pandas as pd
 
 
+def candles_to_series(candles: list) -> tuple:
+    """Convert list of Candles to separate pandas Series for indicator functions."""
+    opens   = pd.Series([c.open   for c in candles])
+    highs   = pd.Series([c.high   for c in candles])
+    lows    = pd.Series([c.low    for c in candles])
+    closes  = pd.Series([c.close  for c in candles])
+    volumes = pd.Series([c.volume for c in candles])
+    return opens, highs, lows, closes, volumes
+
+
 def ema(closes: pd.Series, period: int) -> pd.Series:
     """Exponential Moving Average."""
     return closes.ewm(span=period, adjust=False).mean()

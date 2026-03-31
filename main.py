@@ -17,7 +17,7 @@ import pandas as pd
 
 from data.backfill import KrakenBackfill
 from data.feed import KrakenFeed
-from data.indicators import compute_all
+from data.indicators import compute_all, candles_to_series
 from models import Candle
 from storage.trade_db import TradeDB
 from core.regime_detector import RegimeDetector
@@ -35,6 +35,31 @@ def load_config(path: str = "config/config.yaml") -> dict:
         return yaml.safe_load(f)
 
 
+def _validate_config(cfg: dict) -> None:
+    """Raise ValueError with a clear message if any critical config keys are missing."""
+    required = [
+        ("symbol", ["symbols"]),
+        ("timeframe", ["timeframe"]),
+        ("indicators.ema_fast", ["indicators", "ema_fast"]),
+        ("indicators.ema_slow", ["indicators", "ema_slow"]),
+        ("risk.risk_per_trade_pct", ["risk", "risk_per_trade_pct"]),
+        ("risk.max_position_pct", ["risk", "max_position_pct"]),
+        ("risk.notional_size", ["risk", "notional_size"]),
+        ("broker.mode", ["broker", "mode"]),
+        ("circuit_breaker.max_daily_loss_pct", ["circuit_breaker", "max_daily_loss_pct"]),
+        ("circuit_breaker.max_trades_per_day", ["circuit_breaker", "max_trades_per_day"]),
+    ]
+    for label, keys in required:
+        node = cfg
+        for key in keys:
+            if not isinstance(node, dict) or key not in node:
+                raise ValueError(
+                    f"Missing required config key: '{label}'. "
+                    f"Check config/config.yaml."
+                )
+            node = node[key]
+
+
 def setup_logging(cfg: dict):
     os.makedirs("logs", exist_ok=True)
     logging.basicConfig(
@@ -47,18 +72,9 @@ def setup_logging(cfg: dict):
     )
 
 
-def candles_to_series(candles: list) -> tuple:
-    """Convert list of Candles to separate pandas Series for indicator functions."""
-    opens   = pd.Series([c.open   for c in candles])
-    highs   = pd.Series([c.high   for c in candles])
-    lows    = pd.Series([c.low    for c in candles])
-    closes  = pd.Series([c.close  for c in candles])
-    volumes = pd.Series([c.volume for c in candles])
-    return opens, highs, lows, closes, volumes
-
-
 def run(config_path: str = "config/config.yaml"):
     cfg = load_config(config_path)
+    _validate_config(cfg)
     setup_logging(cfg)
     logger = logging.getLogger("main")
 
@@ -101,7 +117,10 @@ def run(config_path: str = "config/config.yaml"):
     logger.info("Backfill complete: %d candles loaded", len(candle_buffer))
 
     # ── Live feed ─────────────────────────────────────────────────────────
+    _cb_alerted = False  # tracks whether circuit-break alert fired for current WATCHING window
+
     def on_candle_close(candle: Candle):
+        nonlocal _cb_alerted
         candle_buffer.append(candle)
         opens, highs, lows, closes, volumes = candles_to_series(list(candle_buffer))
         inds = compute_all(opens, highs, lows, closes, volumes, cfg["indicators"])
@@ -122,11 +141,15 @@ def run(config_path: str = "config/config.yaml"):
             )
             if not allowed:
                 blocked = True
-                logger.info("CIRCUIT BREAK | %s", block_reason)
-                notifier.send_circuit_break(block_reason)
+                if not _cb_alerted:
+                    logger.info("CIRCUIT BREAK | %s", block_reason)
+                    notifier.send_circuit_break(block_reason)
+                    _cb_alerted = True
             else:
+                _cb_alerted = False  # reset when circuit breaker clears
                 for strategy in strategies:
                     if strategy.should_enter(inds, regime, cfg):
+                        _cb_alerted = False  # fresh signal window; reset flag
                         opened = state_machine.on_entry_signal(
                             strategy.name, candle, paper_broker, db, cfg, symbol, regime.value
                         )
@@ -185,13 +208,22 @@ def run(config_path: str = "config/config.yaml"):
             indicators=inds,
         )
 
-        logger.info(
-            "[%s] close=%.4f regime=%s state=%s stop=%.4f adx=%.1f rsi=%.1f "
-            "bb_w=%.4f balance=$%.2f",
-            symbol, candle.close, regime.value, state_machine.state.value,
-            trade_manager.stop_price, inds["adx"], inds["rsi"],
-            inds["bb_width_pct"], paper_broker.get_account_balance(),
-        )
+        if state_machine.state == TradeState.IN_TRADE:
+            logger.info(
+                "[%s] close=%.4f regime=%s state=%s stop=%.4f adx=%.1f rsi=%.1f "
+                "bb_w=%.4f balance=$%.2f",
+                symbol, candle.close, regime.value, state_machine.state.value,
+                trade_manager.stop_price, inds["adx"], inds["rsi"],
+                inds["bb_width_pct"], paper_broker.get_account_balance(),
+            )
+        else:
+            logger.info(
+                "[%s] close=%.4f regime=%s state=%s adx=%.1f rsi=%.1f "
+                "bb_w=%.4f balance=$%.2f",
+                symbol, candle.close, regime.value, state_machine.state.value,
+                inds["adx"], inds["rsi"],
+                inds["bb_width_pct"], paper_broker.get_account_balance(),
+            )
 
         db.write_dashboard_state(
             state=state_machine.state.value,
@@ -222,10 +254,11 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="SniperBot V2")
     parser.add_argument("--backtest", action="store_true", help="Run backtest instead of live feed")
+    parser.add_argument("--config", default="config/config.yaml", help="Path to config file")
     args = parser.parse_args()
 
     if args.backtest:
         from backtest.engine import BacktestEngine
-        BacktestEngine(load_config()).run()
+        BacktestEngine(load_config(args.config)).run()
     else:
-        run()
+        run(args.config)

@@ -18,8 +18,6 @@ from typing import Optional
 from models import Candle
 from risk.position_sizer import PositionSizer
 
-_sizer = PositionSizer()
-
 logger = logging.getLogger(__name__)
 
 
@@ -66,7 +64,8 @@ class StateMachine:
             # Confirmation — open the trade
             if candle.close <= 0:
                 raise ValueError(f"candle.close must be positive, got {candle.close}")
-            size = _sizer.calculate(cfg, candle.close, broker.get_account_balance())
+            sizer = PositionSizer()
+            size = sizer.calculate(cfg, candle.close, broker.get_account_balance())
             broker.set_fill_price(candle.close, candle.timestamp)
             result = broker.place_order(symbol, "buy", size, "market")
             self.trade_id = db.insert_trade(
@@ -130,6 +129,10 @@ class StateMachine:
         if self.state == TradeState.WATCHING:
             self._watch_count += 1
             if self._watch_count >= self._max_watch_candles:
+                logger.info(
+                    "Signal faded after %d candles — returning to IDLE",
+                    self._max_watch_candles,
+                )
                 self.state = TradeState.IDLE
                 self._strategy_name = None
                 self._watch_count = 0

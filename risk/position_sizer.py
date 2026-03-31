@@ -24,11 +24,15 @@ class PositionSizer:
         """
         mode = cfg["risk"]["mode"]
         if mode == "notional":
-            return cfg["risk"]["notional_size"] / price
+            size = cfg["risk"]["notional_size"] / price
         elif mode == "risk_pct":
             risk_amount = account_balance * cfg["risk"]["risk_per_trade_pct"] / 100.0
-            return risk_amount / price
+            size = risk_amount / price
         else:
             raise ValueError(
                 f"Unsupported risk.mode: {mode!r}. Expected 'notional' or 'risk_pct'."
             )
+
+        max_size = (account_balance * cfg["risk"]["max_position_pct"] / 100.0) / price
+        size = min(size, max_size)
+        return size

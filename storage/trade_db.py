@@ -19,17 +19,27 @@ class TradeDB:
     def __init__(self, db_path: str):
         self._path = db_path
         self._local = threading.local()
+        self._all_connections: list = []
+        self._conn_lock = threading.Lock()
 
     def _get_conn(self) -> sqlite3.Connection:
         if not hasattr(self._local, "conn") or self._local.conn is None:
             self._local.conn = sqlite3.connect(self._path, check_same_thread=False)
             self._local.conn.row_factory = sqlite3.Row
             self._local.conn.execute("PRAGMA journal_mode=WAL")
+            with self._conn_lock:
+                self._all_connections.append(self._local.conn)
         return self._local.conn
 
     def close(self):
-        if hasattr(self._local, "conn") and self._local.conn:
-            self._local.conn.close()
+        with self._conn_lock:
+            for conn in self._all_connections:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            self._all_connections.clear()
+        if hasattr(self._local, "conn"):
             self._local.conn = None
 
     def create_tables(self):

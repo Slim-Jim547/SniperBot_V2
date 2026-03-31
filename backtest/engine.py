@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 
 from data.backfill import KrakenBackfill
-from data.indicators import compute_all
+from data.indicators import compute_all, candles_to_series
 from models import Candle
 from storage.trade_db import TradeDB
 from core.regime_detector import RegimeDetector
@@ -29,15 +29,6 @@ from strategies.momentum import MomentumStrategy
 from strategies.trend_follow import TrendFollowStrategy
 
 logger = logging.getLogger(__name__)
-
-
-def _candles_to_series(candles: list) -> tuple:
-    opens   = pd.Series([c.open   for c in candles])
-    highs   = pd.Series([c.high   for c in candles])
-    lows    = pd.Series([c.low    for c in candles])
-    closes  = pd.Series([c.close  for c in candles])
-    volumes = pd.Series([c.volume for c in candles])
-    return opens, highs, lows, closes, volumes
 
 
 def _compute_metrics(pnls: list, initial_capital: float) -> dict:
@@ -88,6 +79,7 @@ def _compute_metrics(pnls: list, initial_capital: float) -> dict:
             max_dd = dd
 
     # Trade-based Sharpe: mean(returns) / std(returns) * sqrt(n)
+    # Note: scaled by sqrt(N trades), not annualised — not directly comparable to conventional Sharpe
     returns = [p / initial_capital for p in pnls]
     if len(returns) > 1:
         mean_r = float(np.mean(returns))
@@ -126,28 +118,28 @@ def _print_results(
 
     # Note: win/loss metrics use DB PnL (includes slippage, excludes fees).
     # Final balance reflects fees deducted by BacktestBroker.
-    print("\n=== Backtest Results ===")
-    print(f"Candles replayed : {replayed}  (warm-up: {warmup})")
-    print(f"Trades           : {total}")
+    logger.info("\n=== Backtest Results ===")
+    logger.info("Candles replayed : %s  (warm-up: %s)", replayed, warmup)
+    logger.info("Trades           : %s", total)
 
     if total == 0:
-        print("No trades fired — check strategy thresholds or increase backtest.candle_count.")
-        print("=======================\n")
+        logger.info("No trades fired — check strategy thresholds or increase backtest.candle_count.")
+        logger.info("=======================")
         return
 
-    print(f"Win rate         : {metrics['win_rate'] * 100:.1f}%")
-    print(f"Profit factor    : {pf_str}")
-    print(f"Max drawdown     : -{metrics['max_drawdown_pct']:.1f}%")
-    print(f"Sharpe (trade)   : {metrics['sharpe']:.2f}")
-    print(f"Final balance    : ${final_balance:,.2f}  ({pnl_pct:+.1f}%)")
-    print("=======================\n")
+    logger.info("Win rate         : %.1f%%", metrics["win_rate"] * 100)
+    logger.info("Profit factor    : %s", pf_str)
+    logger.info("Max drawdown     : -%.1f%%", metrics["max_drawdown_pct"])
+    logger.info("Sharpe (trade)   : %.2f", metrics["sharpe"])
+    logger.info("Final balance    : $%s  (%+.1f%%)", f"{final_balance:,.2f}", pnl_pct)
+    logger.info("=======================")
 
     if metrics["win_rate"] > 0.9:
-        print("WARNING: suspiciously high win rate — check for lookahead bias")
+        logger.warning("WARNING: suspiciously high win rate — check for lookahead bias")
     if pf != math.inf and pf > 10:
-        print("WARNING: suspiciously high profit factor")
+        logger.warning("WARNING: suspiciously high profit factor")
     if total < 10:
-        print("WARNING: too few trades for reliable statistics")
+        logger.warning("WARNING: too few trades for reliable statistics")
 
 
 class BacktestEngine:
@@ -174,10 +166,10 @@ class BacktestEngine:
         )
 
         if len(candles) <= warmup:
-            print(
-                f"ERROR: Not enough candles for warm-up. "
-                f"Got {len(candles)}, need > {warmup}. "
-                f"Increase backtest.candle_count in config.yaml."
+            logger.error(
+                "Not enough candles for warm-up. Got %s, need > %s. "
+                "Increase backtest.candle_count in config.yaml.",
+                len(candles), warmup,
             )
             return
 
@@ -209,53 +201,57 @@ class BacktestEngine:
         )
 
         # ── Replay loop ───────────────────────────────────────────────────
-        for candle in replay_candles:
-            buffer.append(candle)
-            opens, highs, lows, closes, volumes = _candles_to_series(list(buffer))
-            inds = compute_all(opens, highs, lows, closes, volumes, cfg["indicators"])
-            inds["close"] = candle.close
+        last_candle = None
+        try:
+            for candle in replay_candles:
+                last_candle = candle
+                buffer.append(candle)
+                opens, highs, lows, closes, volumes = candles_to_series(list(buffer))
+                inds = compute_all(opens, highs, lows, closes, volumes, cfg["indicators"])
+                inds["close"] = candle.close
 
-            regime = regime_detector.classify(inds, cfg)
-            state_machine.tick()
+                regime = regime_detector.classify(inds, cfg)
+                state_machine.tick()
 
-            if state_machine.state in (TradeState.IDLE, TradeState.WATCHING):
-                for strategy in strategies:
-                    if strategy.should_enter(inds, regime, cfg):
-                        opened = state_machine.on_entry_signal(
-                            strategy.name, candle, broker, db, cfg, symbol, regime.value
-                        )
-                        if opened:
-                            trade_manager.open_trade(candle.close, inds["atr"], multiplier)
-                        break
-
-            elif state_machine.state == TradeState.IN_TRADE:
-                trade_manager.update(candle.close, inds["atr"], multiplier)
-                position = broker.get_position(symbol)
-                exit_reason = None
-
-                if trade_manager.is_stopped(candle.close):
-                    exit_reason = "atr_stop"
-                else:
-                    active_name = state_machine.active_strategy_name
+                if state_machine.state in (TradeState.IDLE, TradeState.WATCHING):
                     for strategy in strategies:
-                        if strategy.name == active_name:
-                            if strategy.should_exit(inds, regime, position, cfg):
-                                exit_reason = "strategy_exit"
+                        if strategy.should_enter(inds, regime, cfg):
+                            opened = state_machine.on_entry_signal(
+                                strategy.name, candle, broker, db, cfg, symbol, regime.value
+                            )
+                            if opened:
+                                trade_manager.open_trade(candle.close, inds["atr"], multiplier)
                             break
 
-                if exit_reason and position is not None:
-                    state_machine.on_exit_signal(candle, broker, db, symbol)
-                    trade_manager.close_trade()
+                elif state_machine.state == TradeState.IN_TRADE:
+                    trade_manager.update(candle.close, inds["atr"], multiplier)
+                    position = broker.get_position(symbol)
+                    exit_reason = None
 
-        # ── Force-close any open position at end of replay ────────────────
-        if replay_candles and state_machine.state == TradeState.IN_TRADE:
-            logger.warning("Replay ended with open position — force-closing at last candle close")
-            state_machine.on_exit_signal(candle, broker, db, symbol)
-            trade_manager.close_trade()
+                    if trade_manager.is_stopped(candle.close):
+                        exit_reason = "atr_stop"
+                    else:
+                        active_name = state_machine.active_strategy_name
+                        for strategy in strategies:
+                            if strategy.name == active_name:
+                                if strategy.should_exit(inds, regime, position, cfg):
+                                    exit_reason = "strategy_exit"
+                                break
 
-        # ── Metrics ───────────────────────────────────────────────────────
-        closed_trades = db.get_closed_trades()
-        db.close()
+                    if exit_reason and position is not None:
+                        state_machine.on_exit_signal(candle, broker, db, symbol)
+                        trade_manager.close_trade()
+
+            # ── Force-close any open position at end of replay ────────────────
+            if replay_candles and state_machine.state == TradeState.IN_TRADE:
+                logger.warning("Replay ended with open position — force-closing at last candle close")
+                state_machine.on_exit_signal(last_candle, broker, db, symbol)
+                trade_manager.close_trade()
+
+            # ── Metrics ───────────────────────────────────────────────────────
+            closed_trades = db.get_closed_trades()
+        finally:
+            db.close()
 
         pnls = [t["pnl"] for t in closed_trades if t.get("pnl") is not None]
         metrics = _compute_metrics(pnls, bcfg["initial_capital"])

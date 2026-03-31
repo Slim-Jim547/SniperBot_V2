@@ -89,12 +89,14 @@ class KrakenFeed:
         while True:
             try:
                 await self._connect()
-            except Exception as exc:
-                logger.error(f"WebSocket error: {exc}. Reconnecting in 5s...")
+            except (websockets.ConnectionClosed, OSError, asyncio.TimeoutError) as exc:
+                logger.error("WebSocket error: %s. Reconnecting in 5s...", exc)
                 await asyncio.sleep(5)
 
     async def _connect(self):
-        logger.info(f"Connecting to {self._ws_url}")
+        self._last_begin_time = None
+        self._current = None
+        logger.info("Connecting to %s", self._ws_url)
         async with websockets.connect(self._ws_url) as ws:
             subscribe_msg = json.dumps({
                 "event": "subscribe",
@@ -102,7 +104,7 @@ class KrakenFeed:
                 "subscription": {"name": "ohlc", "interval": self._interval},
             })
             await ws.send(subscribe_msg)
-            logger.info(f"Subscribed to ohlc-{self._interval} for {self._symbol}")
+            logger.info("Subscribed to ohlc-%s for %s", self._interval, self._symbol)
 
             async for raw in ws:
                 try:
@@ -146,5 +148,5 @@ class KrakenFeed:
             volume=self._current["volume"],
             symbol=self._symbol,
         )
-        logger.debug(f"Candle closed: {candle}")
+        logger.debug("Candle closed: %s", candle)
         self._on_close(candle)

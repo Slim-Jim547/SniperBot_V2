@@ -18,6 +18,7 @@ _KEY_DATE = "cb_date"
 _KEY_TRADES = "cb_daily_trades"
 _KEY_LOSS = "cb_daily_loss_usd"
 _KEY_LAST_LOSS_TS = "cb_last_loss_ts"
+_KEY_DAY_START_BALANCE = "cb_day_start_balance"
 
 
 def _today_utc() -> str:
@@ -33,7 +34,7 @@ class CircuitBreaker:
         allowed=False means do NOT place an entry order.
         reason is a human-readable string explaining the block.
         """
-        self._maybe_reset_day(db)
+        self._maybe_reset_day(db, account_balance)
         risk = cfg["risk"]
 
         daily_trades = int(db.get_state(_KEY_TRADES) or "0")
@@ -41,7 +42,8 @@ class CircuitBreaker:
             return False, f"max trades per day reached ({daily_trades})"
 
         daily_loss = float(db.get_state(_KEY_LOSS) or "0.0")
-        loss_limit_usd = account_balance * risk["daily_loss_limit_pct"] / 100.0
+        day_start_balance = float(db.get_state(_KEY_DAY_START_BALANCE) or account_balance)
+        loss_limit_usd = day_start_balance * risk["daily_loss_limit_pct"] / 100.0
         if daily_loss >= loss_limit_usd:
             return False, (
                 f"daily loss limit hit "
@@ -69,7 +71,7 @@ class CircuitBreaker:
             db.set_state(_KEY_LOSS, str(daily_loss))
             db.set_state(_KEY_LAST_LOSS_TS, str(current_ts))
 
-    def _maybe_reset_day(self, db) -> None:
+    def _maybe_reset_day(self, db, account_balance: Optional[float] = None) -> None:
         """Reset daily counters if the UTC date has changed."""
         today = _today_utc()
         if db.get_state(_KEY_DATE) != today:
@@ -77,3 +79,5 @@ class CircuitBreaker:
             db.set_state(_KEY_LOSS, "0.0")
             db.set_state(_KEY_LAST_LOSS_TS, "0")
             db.set_state(_KEY_DATE, today)
+            if account_balance is not None:
+                db.set_state(_KEY_DAY_START_BALANCE, str(account_balance))

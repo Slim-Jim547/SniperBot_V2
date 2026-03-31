@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 
-@dataclass
+@dataclass(frozen=True)
 class Candle:
     timestamp: int    # Unix timestamp of candle open
     open: float
@@ -18,7 +18,7 @@ class Candle:
         return self.close < self.open
 
 
-@dataclass
+@dataclass(frozen=True)
 class OrderResult:
     order_id: str
     symbol: str
@@ -28,7 +28,7 @@ class OrderResult:
     timestamp: int
 
 
-@dataclass
+@dataclass(frozen=True)
 class Position:
     symbol: str
     side: str        # "long" (Phase 2 is long-only)

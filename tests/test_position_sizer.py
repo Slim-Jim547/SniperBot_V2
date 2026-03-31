@@ -2,12 +2,13 @@ import pytest
 from risk.position_sizer import PositionSizer
 
 
-def make_cfg(mode, notional=100.0, risk_pct=1.0):
+def make_cfg(mode, notional=100.0, risk_pct=1.0, max_position_pct=100.0):
     return {
         "risk": {
             "mode": mode,
             "notional_size": notional,
             "risk_per_trade_pct": risk_pct,
+            "max_position_pct": max_position_pct,
         }
     }
 

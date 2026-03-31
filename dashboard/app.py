@@ -89,4 +89,4 @@ if __name__ == "__main__":
     port = cfg["dashboard"]["port"]
     app = create_app(db, cfg)
     print(f"Dashboard running at http://localhost:{port}")
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="127.0.0.1", port=port, debug=False)

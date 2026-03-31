@@ -10,12 +10,12 @@ broker:
   mode: "paper"        # paper | live — change this one line to go live
 
 paper:
-  initial_balance: 10000.0  # starting USD balance for paper trading
+  initial_balance: 500.0  # starting USD balance for paper trading
 
 symbols:
-  - "ATOM/USD"         # Kraken format: slash for WebSocket, stripped to ATOMUSD for REST
+  - "ETH/USD"         # Kraken format: slash for WebSocket, stripped to ETHUSD for REST
 
-timeframe: "5"         # candle size in minutes (5 = 5-minute candles)
+timeframe: "15"         # candle size in minutes (5 = 5-minute candles)
 
 backfill:
   candle_count: 500    # how many historical candles to load on startup
@@ -31,7 +31,7 @@ indicators:
   atr_period: 14
   adx_period: 14
   volume_ma_period: 20
-  mtf_timeframe: "60"  # multi-timeframe in minutes (1h)
+  mtf_timeframe: "30"  # multi-timeframe in minutes (1h)
 
 regime:
   adx_trending_threshold: 25    # ADX above this → TRENDING
@@ -50,13 +50,13 @@ strategies:
     rsi_overbought: 70              # RSI at or above this → skip entry
 
 risk:
-  mode: "risk_pct"             # risk_pct | notional
+  mode: "notional"             # risk_pct | notional
   risk_per_trade_pct: 1.0      # % of account to risk per trade
-  notional_size: 100.0         # fixed USD size if mode = notional
+  notional_size: 50.0         # fixed USD size if mode = notional
   max_position_pct: 10.0       # max % of account in a single position
   daily_loss_limit_pct: 3.0    # halt trading after this daily drawdown %
-  max_trades_per_day: 10       # circuit breaker: max trades in one day
-  cooldown_minutes: 30         # cooldown after a loss before next trade
+  max_trades_per_day: 40       # circuit breaker: max trades in one day
+  cooldown_minutes: 5         # cooldown after a loss before next trade
   atr_stop_multiplier: 2.0     # trailing stop = close - multiplier * ATR
 
 database:

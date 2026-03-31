@@ -1,5 +1,6 @@
 import pytest
 from strategies.momentum import MomentumStrategy
+from strategies.trend_follow import TrendFollowStrategy
 from core.regime_detector import RegimeLabel
 from models import Position
 
@@ -102,9 +103,6 @@ class TestMomentumStrategy:
 
     def test_strategy_name(self):
         assert self.strategy.name == "momentum"
-
-
-from strategies.trend_follow import TrendFollowStrategy
 
 
 TF_CFG = {
