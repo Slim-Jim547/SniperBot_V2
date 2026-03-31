@@ -104,6 +104,11 @@
       return `<span class="${cls}">${sign}$${v.toFixed(2)}</span>`;
     }
 
+    function esc(s) {
+      if (s == null) return '—';
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
     function applyStatus(data) {
       const bot = data.bot;
 
@@ -121,11 +126,11 @@
       const p = data.open_position;
       if (p) {
         posEl.innerHTML = `
-          <div class="lbl">Symbol</div>      <div class="val">${p.symbol}</div>
+          <div class="lbl">Symbol</div>      <div class="val">${esc(p.symbol)}</div>
           <div class="lbl">Strategy / Regime</div>
-          <div class="val">${p.strategy} / ${p.regime}</div>
-          <div class="lbl">Entry Price</div>  <div class="val">$${p.entry_price.toFixed(4)}</div>
-          <div class="lbl">Size</div>          <div class="val">${p.size.toFixed(4)}</div>
+          <div class="val">${esc(p.strategy)} / ${esc(p.regime)}</div>
+          <div class="lbl">Entry Price</div>  <div class="val">${p.entry_price != null ? '$' + p.entry_price.toFixed(4) : '—'}</div>
+          <div class="lbl">Size</div>          <div class="val">${p.size != null ? p.size.toFixed(4) : '—'}</div>
           <div class="lbl">Unrealized PnL</div>
           <div class="val">${fmtPnl(p.unrealized_pnl)}</div>
           <div class="lbl">Opened</div>       <div class="val">${fmtTs(p.entry_time)}</div>
@@ -150,9 +155,9 @@
       tbody.innerHTML = trades.map(t => `
         <tr>
           <td>${fmtTs(t.exit_time)}</td>
-          <td>${t.symbol}</td>
-          <td>${t.strategy}</td>
-          <td>${t.regime}</td>
+          <td>${esc(t.symbol)}</td>
+          <td>${esc(t.strategy)}</td>
+          <td>${esc(t.regime)}</td>
           <td>$${t.entry_price.toFixed(4)}</td>
           <td>${t.exit_price != null ? '$' + t.exit_price.toFixed(4) : '—'}</td>
           <td>${fmtPnl(t.pnl)}</td>
