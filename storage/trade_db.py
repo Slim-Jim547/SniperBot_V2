@@ -9,6 +9,7 @@ import sqlite3
 import json
 import math
 import logging
+import threading
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -17,19 +18,19 @@ logger = logging.getLogger(__name__)
 class TradeDB:
     def __init__(self, db_path: str):
         self._path = db_path
-        self._conn: Optional[sqlite3.Connection] = None
+        self._local = threading.local()
 
     def _get_conn(self) -> sqlite3.Connection:
-        if self._conn is None:
-            self._conn = sqlite3.connect(self._path, check_same_thread=False)
-            self._conn.row_factory = sqlite3.Row
-            self._conn.execute("PRAGMA journal_mode=WAL")
-        return self._conn
+        if not hasattr(self._local, "conn") or self._local.conn is None:
+            self._local.conn = sqlite3.connect(self._path, check_same_thread=False)
+            self._local.conn.row_factory = sqlite3.Row
+            self._local.conn.execute("PRAGMA journal_mode=WAL")
+        return self._local.conn
 
     def close(self):
-        if self._conn:
-            self._conn.close()
-            self._conn = None
+        if hasattr(self._local, "conn") and self._local.conn:
+            self._local.conn.close()
+            self._local.conn = None
 
     def create_tables(self):
         conn = self._get_conn()
@@ -158,7 +159,7 @@ class TradeDB:
         trades = [dict(r) for r in rows]
         total = len(trades)
         wins = sum(1 for t in trades if t["pnl"] is not None and t["pnl"] > 0)
-        losses = total - wins
+        losses = sum(1 for t in trades if t["pnl"] is not None and t["pnl"] < 0)
         total_pnl = sum(t["pnl"] for t in trades if t["pnl"] is not None)
         return {
             "date": now.strftime("%Y-%m-%d"),
