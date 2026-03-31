@@ -46,8 +46,9 @@ def _validate_config(cfg: dict) -> None:
         ("risk.max_position_pct", ["risk", "max_position_pct"]),
         ("risk.notional_size", ["risk", "notional_size"]),
         ("broker.mode", ["broker", "mode"]),
-        ("circuit_breaker.max_daily_loss_pct", ["circuit_breaker", "max_daily_loss_pct"]),
-        ("circuit_breaker.max_trades_per_day", ["circuit_breaker", "max_trades_per_day"]),
+        ("risk.daily_loss_limit_pct", ["risk", "daily_loss_limit_pct"]),
+        ("risk.max_trades_per_day", ["risk", "max_trades_per_day"]),
+        ("risk.cooldown_minutes", ["risk", "cooldown_minutes"]),
     ]
     for label, keys in required:
         node = cfg
