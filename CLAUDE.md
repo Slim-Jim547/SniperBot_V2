@@ -4,9 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
+> **All commands assume CWD = `C:/projects/SniperBot_V2`.** In Bash tool calls, prefix each command with `cd C:/projects/SniperBot_V2 &&`. The flat package layout requires the project root on `sys.path` — running from a subdirectory causes `ImportError`.
+
 ```bash
-# Run the bot (must run from project root — config path is relative)
+# Run the bot
 venv/Scripts/python main.py   # Windows (or activate venv first)
+
+# Run the dashboard (separate terminal, reads same DB file)
+venv/Scripts/python dashboard/app.py   # opens http://localhost:5000
 
 # Run all tests
 venv/Scripts/pytest -v        # Windows
@@ -25,7 +30,7 @@ venv/Scripts/pip install -r requirements.txt
 
 **Flat package layout** — `SniperBot_V2/` is the package root. Modules import each other directly (e.g. `from data.indicators import compute_all`). No top-level package wrapping.
 
-**Planned directory structure (all 6 phases):**
+**Directory structure (Phases 1–5 complete):**
 ```
 ├── config/config.yaml          # All parameters — nothing hardcoded in Python
 ├── secrets/                    # Credentials only — never committed to git
@@ -44,16 +49,18 @@ venv/Scripts/pip install -r requirements.txt
 │   └── indicators.py           # ALL technical indicator calculations live here
 ├── risk/
 │   ├── position_sizer.py       # Notional and risk-based sizing
-│   ├── portfolio_manager.py    # Multi-symbol wallet % allocation
+│   ├── portfolio_manager.py    # Multi-symbol wallet % allocation  ← Phase 6+ (not yet implemented)
 │   └── circuit_breaker.py      # Daily loss, max trades, cooldowns
 ├── execution/
 │   ├── broker_base.py          # Abstract broker interface (shared contract)
 │   ├── paper_broker.py         # Simulated fills — reads config, no API calls
-│   └── live_broker.py          # Kraken REST API order placement (Phase 6)
+│   └── live_broker.py          # Kraken REST API order placement  ← Phase 6 (not yet implemented)
 ├── storage/trade_db.py         # SQLite — all reads and writes go through here
 ├── alerts/notifier.py          # Discord + Telegram behind one interface
 ├── dashboard/app.py            # Local Flask app — reads SQLite, auto-refreshes
+├── dashboard/templates/index.html  # Single-page dark-themed dashboard, vanilla JS polling
 ├── backtest/engine.py          # Offline historical replay against OHLCV data
+├── logs/                       # Created at runtime by logging setup
 ├── models.py                   # Candle dataclass (shared, root level)
 └── main.py                     # Entry point — wires everything, runs the loop
 ```
@@ -62,7 +69,7 @@ venv/Scripts/pip install -r requirements.txt
 ```
 config.yaml → KrakenBackfill (REST, no auth) → deque[Candle] → compute_all() → TradeDB.insert_signal()
                                                                 ↑
-config.yaml → KrakenFeed (WebSocket, no auth) → on_candle_close() (each 5m candle)
+config.yaml → KrakenFeed (WebSocket, no auth) → on_candle_close() (each 15m candle)
 ```
 
 **Per-candle-close flow (Phase 2+):**
@@ -92,91 +99,76 @@ cancel_order(order_id) → bool
 ```
 Switching paper → live is one line in `config.yaml` (`broker.mode: live`). Zero code changes.
 
+**`core/trade_manager.py`** — ATR trailing stop for the open position (Hard Rule 6: update on candle close only):
+- `open_trade(entry_price, atr, multiplier)` → sets initial stop = entry_price - multiplier * atr
+- `update(candle_close, atr, multiplier)` → trails stop upward only; no-op when inactive
+- `is_stopped(candle_close)` → True if active AND close <= stop
+- `close_trade()` → resets to inactive; call after `on_exit_signal()`
+
+**`risk/circuit_breaker.py`** — gates entry signals; state persisted in `bot_state` via TradeDB:
+- `check(db, cfg, account_balance, current_ts)` → `(bool, Optional[str])` — False = blocked
+- `record_trade(db, pnl, current_ts)` → call once per closed trade
+- **Design:** tracks cumulative gross losses; wins do NOT offset losses. Intentional — prevents chasing losses after a bad series.
+
+**`alerts/notifier.py`** — Discord + Telegram behind one interface; credentials from `secrets/secrets.yaml`:
+- `Notifier.from_secrets(path)` → silent no-op notifier if file missing or malformed (catches `OSError`, `yaml.YAMLError`)
+- `send_trade_opened()`, `send_trade_closed()`, `send_circuit_break()` — never raise on network error
+- Exception logging uses `type(exc).__name__` only — never logs full exception (would leak webhook URL / bot token)
+
 **`core/state_machine.py`** — manages trade lifecycle only, no strategy logic:
 - `IDLE` → `WATCHING` (signal detected)
 - `WATCHING` → `IN_TRADE` (confirmed) or → `IDLE` (signal faded)
 - `IN_TRADE` → `CLOSING` (exit triggered)
 - `CLOSING` → `IDLE` (fill confirmed)
+- `on_exit_signal()` → `Optional[float]` — returns PnL from broker fill price (or None if no position found); use this value for circuit breaker and notifier, do not recompute independently
 
 **`storage/trade_db.py`** — core tables: `trades` (entry/exit/P&L/strategy/regime), `signals` (all signals including blocked ones), `daily_summary` (dashboard stats), `bot_state` (circuit breaker state persisted across restarts).
+- Dashboard methods: `write_dashboard_state(state, balance, regime, last_close, last_ts)` / `get_dashboard_state()` — uses `bot_state` table with `dash_*` key prefix.
+- `get_today_summary()` counts `wins` as `pnl > 0`, `losses` as `pnl < 0` (flat trades not counted as losses).
+- Uses `threading.local()` connections — safe for Flask multi-threaded requests. Do not revert to a single shared `self._conn`.
 
 **`backtest/engine.py`** — replays historical OHLCV through the same regime → strategy → trade_manager stack used live. Logs to a separate `backtest.db`. Outputs: total trades, win rate, profit factor, max drawdown, Sharpe.
 
 ## Configuration
 
-Two files, strict separation:
-
 **`config/config.yaml`** — all non-sensitive parameters:
 - `broker.mode: paper | live` — switching to live requires only this line change
 - `indicators.*` — all periods for EMA/RSI/BB/ATR/ADX/volume indicators
 - `backfill.candle_count` — warm-up history size on startup
-- `timeframe` — candle size in minutes (default `"5"`)
+- `timeframe` — candle size in minutes
 
 **`secrets/secrets.yaml`** — all credentials (gitignored, never committed):
-- `exchange.api_key` / `exchange.api_secret` — Kraken API keys (Phase 6 live trading only — not needed for Phases 1–5)
+- `exchange.api_key` / `exchange.api_secret` — Kraken API keys (Phase 6 live trading only)
 - `alerts.discord_webhook`
 - `alerts.telegram_bot_token` / `alerts.telegram_chat_id`
 
 ## Exchange: Kraken
 
-**Data pivot (March 2026):** Originally targeted Coinbase Advanced Trade. Switched to Kraken because Kraken's public market data endpoints require **zero authentication** — no API keys needed for Phases 1–5.
+Public endpoints — zero auth needed for Phases 1–5.
 
-**Kraken public REST (backfill):**
-- Endpoint: `GET https://api.kraken.com/0/public/OHLC?pair=ATOMUSD&interval=5&since=<unix_ts>`
-- Max 720 candles per request
-- Response: `{"result": {"ATOMUSD": [[time, open, high, low, close, vwap, volume, count], ...], "last": <ts>}}`
-- No `Authorization` header needed
+- REST base: `https://api.kraken.com/0/public/`
+- WebSocket: `wss://ws.kraken.com`
+- Symbol format: `ETHUSD` for REST params, `ETH/USD` for WebSocket pair names
+- Phase 6 live trading uses HMAC-SHA512 auth; keys go in `secrets/secrets.yaml`
 
-**Kraken public WebSocket (live feed):**
-- URL: `wss://ws.kraken.com`
-- Subscribe: `{"event":"subscribe","pair":["ATOM/USD"],"subscription":{"name":"ohlc","interval":5}}`
-- Messages: `[channelID, [beginTime, endTime, open, high, low, close, vwap, volume, count], "ohlc-5", "ATOM/USD"]`
-- Candle closes when `beginTime` in a new message differs from the previous — emit the old candle
-- No auth needed for market data subscriptions
-
-**Symbol format:** `ATOMUSD` for REST params, `ATOM/USD` for WebSocket pair names.
-
-**Kraken live trading auth (Phase 6 only):** REST private endpoints use HMAC-SHA512. API key + secret go in `secrets/secrets.yaml`. Not needed until Phase 6.
+Full wire protocol detail (subscribe messages, response schemas, candle-close detection): see `docs/kraken-api-notes.md`.
 
 ## Build Phases
 
-Each phase must be fully validated before starting the next.
+Each phase must be fully validated before starting the next. Any `pytest FAILED` = stop and fix before continuing.
 
 | Phase | Goal | Validation |
 |-------|------|------------|
 | 1 ✅ | Foundation — config, indicators, backfill, feed, SQLite | Bot starts, backfills, prints indicators on each close, logs to DB |
 | 1.5 ✅ | Secrets — create `secrets/secrets.yaml`, move all credentials out of `config.yaml`, add `secrets/` to `.gitignore` | No credentials in `config.yaml`; `secrets/` not tracked by git |
-| 1.6 | **Kraken pivot** — rewrite `data/backfill.py` and `data/feed.py` for Kraken public API (no auth) | Bot starts, backfills 500 candles from Kraken, prints indicators on each live close |
-| 2 | Regime detector + strategies + paper broker + state machine | Signals fire in correct regimes only; paper trades open/close; all logged |
-| 3 | Risk & exits — ATR trailing stop, position sizer, circuit breaker, alerts | Trailing stop trails correctly on candle close; circuit breakers fire; Discord alerts working |
-| 4 | Backtest engine — offline OHLCV replay | Backtest completes without errors; results are believable (90%+ win rate = bug) |
-| 5 | Dashboard — Flask on port 5000, auto-refresh 30s | Loads at localhost:5000; shows current state, open position, today's summary, last 20 trades |
+| 1.6 ✅ | **Kraken pivot** — rewrite `data/backfill.py` and `data/feed.py` for Kraken public API (no auth) | Bot starts, backfills 500 candles from Kraken, prints indicators on each live close |
+| 2 ✅ | Regime detector + strategies + paper broker + state machine | Signals fire in correct regimes only; paper trades open/close; all logged |
+| 3 ✅ | Risk & exits — ATR trailing stop, position sizer, circuit breaker, alerts | Trailing stop trails correctly on candle close; circuit breakers fire; Discord alerts working |
+| 4 ✅ | Backtest engine — offline OHLCV replay | Backtest completes without errors; results are believable (90%+ win rate = bug) |
+| 5 ✅ | Dashboard — Flask on port 5000, auto-refresh 30s | Loads at localhost:5000; shows current state, open position, today's summary, last 20 trades |
 | 6 | Live broker | Only after Phase 4 shows consistent positive expectancy over 100+ paper trades |
 
 **Do not rush to Phase 6.** A bot that is not profitable on paper will not be profitable live. The market adds costs and slippage that make paper results optimistic.
-
-## Code Review Policy
-
-When a phase of development is complete, you MUST run the code-reviewer 
-agent before marking the phase done or moving to the next phase.
-
-A phase is complete when:
-- All planned tasks for that phase are implemented
-- All tests pass
-- You are about to tell the user "Phase X is complete"
-
-At that point, invoke the code-reviewer agent on the full project 
-directory before reporting completion to the user.
-
-## Phase Completion Requirement
-
-Before telling the user any phase is complete, you MUST:
-
-1. Run the code-reviewer agent on the project directory
-2. Present the full Codex review to the user
-3. If verdict is NEEDS WORK or BLOCKED, do NOT proceed to the next phase
-4. Only move forward after either fixing the issues or getting explicit 
-   user approval to proceed anyway
 
 ## Testing Notes
 
@@ -189,6 +181,6 @@ def test_foo(self, mock_get):
     mock_get.return_value.status_code = 200
     mock_get.return_value.json.return_value = {
         "error": [],
-        "result": {"ATOMUSD": [[1616148000,"7.21","7.30","7.19","7.26","7.24","100.0",10]], "last": 1616148000}
+        "result": {"ETHUSD": [[1616148000,"7.21","7.30","7.19","7.26","7.24","100.0",10]], "last": 1616148000}
     }
 ```
