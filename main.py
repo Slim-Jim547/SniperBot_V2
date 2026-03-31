@@ -193,6 +193,14 @@ def run(config_path: str = "config/config.yaml"):
             inds["bb_width_pct"], paper_broker.get_account_balance(),
         )
 
+        db.write_dashboard_state(
+            state=state_machine.state.value,
+            balance=paper_broker.get_account_balance(),
+            regime=regime.value,
+            last_close=candle.close,
+            last_ts=candle.timestamp,
+        )
+
     feed = KrakenFeed(
         ws_url=cfg["exchange"]["ws_url"],
         symbol=symbol,
