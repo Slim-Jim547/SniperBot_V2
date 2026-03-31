@@ -117,10 +117,10 @@
       stateEl.className    = `val state-${bot.state}`;
 
       document.getElementById('bot-balance').textContent =
-        bot.balance ? `$${bot.balance.toFixed(2)}` : '—';
+        bot.balance != null ? `$${bot.balance.toFixed(2)}` : '—';
       document.getElementById('bot-regime').textContent    = bot.regime   || '—';
       document.getElementById('bot-last-close').textContent =
-        bot.last_close ? `$${bot.last_close.toFixed(4)}` : '—';
+        bot.last_close != null ? `$${bot.last_close.toFixed(4)}` : '—';
 
       const posEl = document.getElementById('position-body');
       const p = data.open_position;
