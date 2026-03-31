@@ -136,6 +136,63 @@ class TradeDB:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_recent_trades(self, limit: int = 20) -> list:
+        """Return the most recent closed trades, newest first."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM trades WHERE status='closed' ORDER BY exit_time DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_today_summary(self) -> dict:
+        """Compute today's UTC trade stats directly from the trades table."""
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        midnight_ts = int(now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT pnl FROM trades WHERE status='closed' AND exit_time >= ?",
+            (midnight_ts,),
+        ).fetchall()
+        trades = [dict(r) for r in rows]
+        total = len(trades)
+        wins = sum(1 for t in trades if t["pnl"] is not None and t["pnl"] > 0)
+        losses = total - wins
+        total_pnl = sum(t["pnl"] for t in trades if t["pnl"] is not None)
+        return {
+            "date": now.strftime("%Y-%m-%d"),
+            "total_trades": total,
+            "wins": wins,
+            "losses": losses,
+            "total_pnl": round(total_pnl, 2),
+        }
+
+    def write_dashboard_state(
+        self,
+        state: str,
+        balance: float,
+        regime: str,
+        last_close: float,
+        last_ts: int,
+    ) -> None:
+        """Persist live bot state so the dashboard can read it without needing the bot process."""
+        self.set_state("dash_state", state)
+        self.set_state("dash_balance", str(balance))
+        self.set_state("dash_regime", regime)
+        self.set_state("dash_last_close", str(last_close))
+        self.set_state("dash_last_ts", str(last_ts))
+
+    def get_dashboard_state(self) -> dict:
+        """Read the last-written dashboard state. Returns safe defaults if bot hasn't run yet."""
+        return {
+            "state":      self.get_state("dash_state")      or "UNKNOWN",
+            "balance":    float(self.get_state("dash_balance")    or "0"),
+            "regime":     self.get_state("dash_regime")     or "UNKNOWN",
+            "last_close": float(self.get_state("dash_last_close") or "0"),
+            "last_ts":    int(self.get_state("dash_last_ts")      or "0"),
+        }
+
     # ── Signals ───────────────────────────────────────────────────────────
 
     def insert_signal(
