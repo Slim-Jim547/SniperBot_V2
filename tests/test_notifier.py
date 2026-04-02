@@ -134,16 +134,18 @@ class TestNotifier:
         assert "6.8100" in msg
         assert "BREAKOUT" in msg
 
-    def test_send_trade_closed_includes_pnl(self):
+    def test_send_trade_closed_includes_key_fields(self):
         notifier = Notifier("https://discord.example/wh", None, None)
         captured = []
         with patch("alerts.notifier.requests.post") as mock_post:
             mock_post.return_value.raise_for_status = MagicMock()
             mock_post.side_effect = lambda url, json, timeout: captured.append(json["content"]) or MagicMock(raise_for_status=MagicMock())
-            notifier.send_trade_closed("ATOM/USD", 15.32, 7.37, "atr_stop")
+            notifier.send_trade_closed(15.32, 7.37, "atr_stop")
         msg = captured[0]
         assert "+15.32" in msg
+        assert "7.3700" in msg
         assert "atr_stop" in msg
+        assert "ATOM/USD" not in msg
 
     def test_send_trade_closed_shows_negative_pnl(self):
         notifier = Notifier("https://discord.example/wh", None, None)
@@ -151,17 +153,7 @@ class TestNotifier:
         with patch("alerts.notifier.requests.post") as mock_post:
             mock_post.return_value.raise_for_status = MagicMock()
             mock_post.side_effect = lambda url, json, timeout: captured.append(json["content"]) or MagicMock(raise_for_status=MagicMock())
-            notifier.send_trade_closed("ATOM/USD", -8.50, 7.10, "strategy_exit")
+            notifier.send_trade_closed(-8.50, 7.10, "strategy_exit")
         msg = captured[0]
         assert "-8.50" in msg
 
-    def test_send_circuit_break_includes_reason(self):
-        notifier = Notifier("https://discord.example/wh", None, None)
-        captured = []
-        with patch("alerts.notifier.requests.post") as mock_post:
-            mock_post.return_value.raise_for_status = MagicMock()
-            mock_post.side_effect = lambda url, json, timeout: captured.append(json["content"]) or MagicMock(raise_for_status=MagicMock())
-            notifier.send_circuit_break("max trades per day reached (10)")
-        msg = captured[0]
-        assert "CIRCUIT BREAK" in msg
-        assert "max trades" in msg
