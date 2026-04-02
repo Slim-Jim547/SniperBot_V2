@@ -118,10 +118,8 @@ def run(config_path: str = "config/config.yaml"):
     logger.info("Backfill complete: %d candles loaded", len(candle_buffer))
 
     # ── Live feed ─────────────────────────────────────────────────────────
-    _cb_alerted = False  # tracks whether circuit-break alert fired for current WATCHING window
 
     def on_candle_close(candle: Candle):
-        nonlocal _cb_alerted
         candle_buffer.append(candle)
         opens, highs, lows, closes, volumes = candles_to_series(list(candle_buffer))
         inds = compute_all(opens, highs, lows, closes, volumes, cfg["indicators"])
@@ -142,15 +140,10 @@ def run(config_path: str = "config/config.yaml"):
             )
             if not allowed:
                 blocked = True
-                if not _cb_alerted:
-                    logger.info("CIRCUIT BREAK | %s", block_reason)
-                    notifier.send_circuit_break(block_reason)
-                    _cb_alerted = True
+                logger.info("CIRCUIT BREAK | %s", block_reason)
             else:
-                _cb_alerted = False  # reset when circuit breaker clears
                 for strategy in strategies:
                     if strategy.should_enter(inds, regime, cfg):
-                        _cb_alerted = False  # fresh signal window; reset flag
                         opened = state_machine.on_entry_signal(
                             strategy.name, candle, paper_broker, db, cfg, symbol, regime.value
                         )
@@ -190,7 +183,7 @@ def run(config_path: str = "config/config.yaml"):
                 exit_pnl = state_machine.on_exit_signal(candle, paper_broker, db, symbol) or 0.0
                 trade_manager.close_trade()
                 circuit_breaker.record_trade(db, exit_pnl, candle.timestamp)
-                notifier.send_trade_closed(symbol, exit_pnl, candle.close, exit_reason)
+                notifier.send_trade_closed(exit_pnl, candle.close, exit_reason)
                 logger.info(
                     "TRADE CLOSED | reason=%s price=%.4f pnl=%.2f balance=$%.2f",
                     exit_reason, candle.close, exit_pnl,
