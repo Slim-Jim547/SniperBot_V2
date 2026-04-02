@@ -67,20 +67,16 @@ class Notifier:
         self.send(msg)
 
     def send_trade_closed(
-        self, symbol: str, pnl: float, exit_price: float, reason: str
+        self, pnl: float, exit_price: float, reason: str
     ) -> None:
         sign = "+" if pnl >= 0 else ""
         msg = (
             f"TRADE CLOSED\n"
-            f"Symbol: {symbol}\n"
             f"Exit:   {exit_price:.4f}\n"
             f"P&L:    {sign}{pnl:.2f}\n"
             f"Reason: {reason}"
         )
         self.send(msg)
-
-    def send_circuit_break(self, reason: str) -> None:
-        self.send(f"CIRCUIT BREAK\n{reason}")
 
     def _send_discord(self, message: str) -> None:
         if not self._discord_webhook:
