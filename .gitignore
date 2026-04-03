@@ -1,5 +1,5 @@
-# Never commit credentials
-secrets/
+# Never commit credentials — ignore the real file, track the example template
+secrets/secrets.yaml
 
 # Runtime artifacts
 logs/
