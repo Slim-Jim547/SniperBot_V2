@@ -13,7 +13,13 @@ Routes:
 """
 
 import os
+import sys
 import yaml
+
+# Ensure project root is on sys.path so sibling packages (storage, etc.) can be imported
+# regardless of which directory Python was launched from.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from flask import Flask, jsonify, render_template
 from storage.trade_db import TradeDB
 
